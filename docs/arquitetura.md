@@ -41,7 +41,7 @@ C4Container
     Rel(lancamentos, mq, "Publica LancamentoRegistrado (via Outbox Relay)", "AMQP")
     Rel(consolidado, mq, "Consome LancamentoRegistrado; NACK → DLX → DLQ", "AMQP")
     Rel(consolidado, pg_c, "Upsert saldo_diario, INSERT eventos_processados", "SQL")
-    Rel(consolidado, redis, "GET/SET saldo:{comerciante}:v{versao}:{data}, INCR saldo:ver:{comerciante}", "Redis protocol")
+    Rel(consolidado, redis, "GET/SET saldo:e{epoca}:{comerciante}:v{versao}:{data}, INCR saldo:ver:{comerciante}, INCR saldo:epoca na reconexão", "Redis protocol")
 ```
 
 ---
@@ -81,13 +81,13 @@ C4Component
         Component(consumer, "Consumer", "amqplib + withRetry", "prefetch=1; erro permanente: 1 tentativa inicial + 3 retries com backoff 1s/2s/4s e NACK sem requeue para a DLQ; falha de banco ou conexão: mensagem retida com espera crescente (1s a 15s) até o banco voltar, sem DLQ")
         Component(retry, "withRetry", "utility pura", "Executa fn até maxRetries+1 vezes; onRetry callback por cada falha intermediária; retorna Result discriminado")
         Component(db_c, "DB Pool", "node-postgres", "Pool para consolidado_db; transações para INSERT eventos_processados + UPSERT saldo_diario")
-        Component(redis_c, "Redis Client", "ioredis", "GET saldo:{comerciante}:v{versao}:{data} → hit retorna JSON; miss → query DB → SETEX 60s; após cada evento incrementa a versão do comerciante")
+        Component(redis_c, "Redis Client", "ioredis", "GET saldo:e{epoca}:{comerciante}:v{versao}:{data} → hit retorna JSON; miss → query DB → SETEX 60s; após cada evento incrementa a versão do comerciante; na reconexão incrementa a época global")
         Component(rmq_c, "RabbitMQ Client", "amqplib", "assertExchange + assertQueue + bindQueue; DLX configurado via x-dead-letter-exchange; prefetch=1")
         Component(metrics_c, "Métricas", "prom-client", "consolidado_http_requests_total, consolidado_events_processed_total por tipo e status, consolidado_consumer_retries_total, consolidado_consumer_dlq_total, consolidado_evento_lag_seconds")
     }
 
     Rel(api_c, auth_c, "Passa por antes de qualquer lógica de negócio")
-    Rel(api_c, redis_c, "GET saldo:{comerciante}:v{versao}:{data}")
+    Rel(api_c, redis_c, "GET saldo:e{epoca}:{comerciante}:v{versao}:{data}")
     Rel(api_c, db_c, "Fallback: soma de saldo_diario do comerciante até a data")
     Rel(consumer, retry, "withRetry(() => processEvent(raw), 3, [1000,2000,4000])")
     Rel(retry, db_c, "BEGIN → INSERT eventos_processados (ON CONFLICT DO NOTHING) → UPSERT saldo_diario → COMMIT")
@@ -202,8 +202,8 @@ O que acontece quando cada peça falha, o que limita o dano e qual teste prova o
 | Cenário | Comportamento | Mitigação | O que prova |
 |---|---|---|---|
 | Consolidado fora do ar | `POST /lancamentos` continua respondendo 201. Os eventos se acumulam na fila `consolidado.lancamentos`. Ao voltar, o consumidor drena e o saldo converge | Processos, bancos e filas separados; broker durável | `tests/resiliencia`, cenário A: 30 de 30 lançamentos aceitos e saldo convergindo na volta |
-| Broker (RabbitMQ) fora do ar | Lançamentos segue aceitando (201) e `/ready` da API continua 200, porque a API só depende do banco. O outbox acumula e o relay reconecta com backoff; na volta, drena | Outbox transacional; relay em processo separado; `ConfirmChannel` e `mandatory` | `tests/resiliencia`, cenário B; `relay.test.ts` (sem confirmação e sem rota mantêm o evento pendente); `reconexao.test.ts` (o consumidor retoma sozinho) |
-| Redis fora do ar | O consolidado **segue pronto**: `/ready` depende só do PostgreSQL e do broker. As leituras caem para o banco (`source: "database"`) sem esperar reconexão (o cliente do Redis não tem fila offline e tem tempo máximo por comando) e o processamento dos eventos continua. Os eventos aplicados sem o Redis não avançam a versão do cache, então uma entrada antiga que sobreviva à parada pode ser servida por até o TTL (60 s) depois que ele volta | Redis fora do `/ready`; cache-aside com fallback; falha de cache tratada como não fatal | `tests/resiliencia` cenário C (`/ready` 200, GET 200 do banco em menos de 3 s, eventos aplicados, defasagem medida na volta); `redis-fora.test.ts` |
+| Broker (RabbitMQ) fora do ar | Lançamentos segue aceitando (201) e `/ready` da API continua 200, porque a API só depende do banco. O outbox acumula e o relay reconecta com backoff de teto 5 s; na volta, drena | Outbox transacional; relay em processo separado; `ConfirmChannel` e `mandatory` | `tests/resiliencia`, cenário B; `relay.test.ts` (sem confirmação e sem rota mantêm o evento pendente); `reconexao.test.ts` (o consumidor retoma sozinho) |
+| Redis fora do ar | O consolidado **segue pronto**: `/ready` depende só do PostgreSQL e do broker. As leituras caem para o banco (`source: "database"`) sem esperar reconexão (o cliente do Redis não tem fila offline e tem tempo máximo por comando) e o processamento dos eventos continua. Os eventos aplicados sem o Redis não avançam a versão do cache, mas a reconexão do cliente avança a **época** global, que faz parte da chave: nenhuma entrada gravada antes da queda é lida depois da volta | Redis fora do `/ready`; cache-aside com fallback; falha de cache tratada como não fatal; época do cache na chave | `tests/resiliencia` cenário C (`/ready` 200, GET 200 do banco em menos de 3 s, eventos aplicados, cache convergindo em menos de 5 s depois da volta); `redis-fora.test.ts` (inclusive a subida da época na reconexão) |
 | Banco do consolidado fora do ar | A API de leitura responde 5xx e `/ready` fica 503. O consumidor **retém a mensagem** (sem `ack` nem `nack`) e tenta de novo com espera crescente (1 s a 15 s) até o banco voltar, então **nada vai para a DLQ** e o saldo converge sozinho depois. Lançamentos não é afetado ([ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)) | Classificação de erro transitório; retenção em vez de DLQ; métrica `consolidado_consumer_transient_errors_total` | `tests/resiliencia` cenário D (banco do consolidado bloqueado por 30 s, lançamentos 201, fila retém, DLQ sem mensagens novas, saldo converge); `dlq.test.ts` (banco bloqueado de verdade e erro simulado); `erro-transitorio.test.ts` |
 | Banco de lançamentos fora do ar | `POST /lancamentos` falha e `/ready` da API fica 503. É a única dependência que o RNF não cobre, por isso o RDS é Multi-AZ. O relay não consegue ler o outbox e tenta de novo | RDS Multi-AZ com failover automático | **Lacuna** em teste automatizado; o 5xx e o `/ready` vêm do código |
 | Evento duplicado | O mesmo `eventoId` altera o saldo uma única vez. Acontece por reentrega do broker ou por falha depois do ack do broker e antes do `COMMIT` do relay | `eventos_processados` com `ON CONFLICT DO NOTHING` na mesma transação do saldo; várias instâncias do relay usam `SKIP LOCKED` | `idempotencia-cache.test.ts` (entregue duas vezes, soma uma); `relay.test.ts` (várias instâncias publicam cada evento uma vez) |

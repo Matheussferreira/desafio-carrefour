@@ -7,6 +7,8 @@ import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import app from '../../src/app';
 import { pool } from '../../src/db';
+import { epocaAtual, gravarSaldo, referenciaAtual } from '../../src/cache/saldoCache';
+import { consultarDia } from '../../src/domain/saldoQueries';
 import { connectRedis, getRedis } from '../../src/redis';
 import { IdpDeTeste } from '../helpers/idp';
 import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEvento } from './helpers';
@@ -63,5 +65,30 @@ describe('Redis fora do ar', () => {
     const retomada = await request(app).get(`/consolidado/${DATA}`).set(auth);
     expect(retomada.status).toBe(200);
     expect(retomada.body.totalCreditos).toBe('125.00');
+  }, 40_000);
+
+  it('na reconexão a época do cache sobe e uma entrada antiga deixa de ser servida em poucos segundos', async () => {
+    const dia = '2031-06-06';
+    const e = montarEvento(uuidv4(), dia, '40.00', 'credito', { comercianteId: LOJA });
+    publicarEvento(infra.pubCh, e);
+    await aguardar(async () => (await pool.query('SELECT 1 FROM eventos_processados WHERE evento_id = $1', [e.eventoId])).rows.length === 1);
+
+    // Entrada velha sob a referência vigente, como a que sobrevive a uma queda do Redis
+    const ref = await referenciaAtual(LOJA);
+    await gravarSaldo(LOJA, ref, dia, { ...(await consultarDia(pool, LOJA, dia)), totalCreditos: '1.00' });
+    const velha = await request(app).get(`/consolidado/${dia}`).set(auth);
+    expect(velha.body).toMatchObject({ source: 'cache', totalCreditos: '1.00' });
+
+    // Queda e volta do cliente: o evento 'ready' depois de um 'close' avança a época
+    const inicio = Date.now();
+    const redis = getRedis();
+    redis.disconnect();
+    await aguardar(async () => redis.status === 'end', 5_000);
+    await redis.connect();
+    await aguardar(async () => (await epocaAtual()) !== ref.epoca, 5_000);
+
+    const depois = await request(app).get(`/consolidado/${dia}`).set(auth);
+    expect(Date.now() - inicio).toBeLessThan(5_000);
+    expect(depois.body).toMatchObject({ source: 'database', totalCreditos: '40.00' });
   }, 40_000);
 });

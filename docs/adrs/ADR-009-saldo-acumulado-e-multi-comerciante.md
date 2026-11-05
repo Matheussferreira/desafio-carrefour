@@ -48,7 +48,7 @@ A chave primária `(comerciante_id, data)` serve esse intervalo diretamente. O d
 
 ### Cache
 
-- Chave `saldo:{comerciante}:v{versao}:{data}`, com TTL de 60 s. A versão vem de um contador por comerciante, `saldo:ver:{comerciante}`.
+- Chave `saldo:e{epoca}:{comerciante}:v{versao}:{data}`, com TTL de 60 s. A versão vem de um contador por comerciante, `saldo:ver:{comerciante}`. A época vem de um contador global, `saldo:epoca`, que sobe quando o cliente Redis do consolidado reconecta depois de uma queda.
 - Um lançamento em uma data D muda o acumulado de D e de **todas as datas posteriores**. Em vez de apagar chaves, o consumidor **incrementa o contador** do comerciante depois do commit. As leituras sempre usam a versão atual; tudo o que estava em cache sob a versão anterior deixa de ser lido e expira pelo TTL. Isso cobre o lançamento retroativo sem precisar saber quais datas estão em cache, e dispensa o índice de datas e a varredura que existiam antes.
 - **Por que versão e não apagar chaves.** Com `DEL`, havia uma corrida: um GET que consultou o banco antes do commit podia gravar o valor antigo depois da invalidação, e ele ficava no cache até o TTL, violando o RNF-05. Com a versão, o leitor **lê a versão antes de consultar o banco** e grava sob essa versão. Se um evento for aplicado nesse meio tempo, o consumidor já terá avançado a versão (o incremento vem depois do commit), e a gravação atrasada cai numa chave de versão velha que nenhuma leitura nova usa. Ordem do consumidor: commit, depois `ultimoEventoAplicadoEm`, depois o incremento da versão.
 - Se o contador some (flush, eviction, Redis novo), ele nasce com o relógio em milissegundos (`SET NX`), de modo que uma versão nova nunca coincide com uma anterior mesmo que restem chaves antigas.
@@ -66,11 +66,11 @@ sequenceDiagram
     C->>DB: BEGIN, evento processado, upsert (comerciante, D), progresso, COMMIT
     C->>R: ultimoEventoAplicadoEm do comerciante
     C->>R: INCR saldo:ver:{comerciante}
-    API->>R: GET saldo:ver:{comerciante} (versão v, lida antes do banco)
-    API->>R: GET saldo:{comerciante}:v{v}:{data}
+    API->>R: GET saldo:epoca e saldo:ver:{comerciante} (época e e versão v, lidas antes do banco)
+    API->>R: GET saldo:e{e}:{comerciante}:v{v}:{data}
     alt miss
         API->>DB: SUM(saldo) das linhas até a data
-        API->>R: SETEX saldo:{comerciante}:v{v}:{data}
+        API->>R: SETEX saldo:e{e}:{comerciante}:v{v}:{data}
     end
     API->>R: ultimoEventoAplicadoEm
 ```
@@ -79,8 +79,9 @@ sequenceDiagram
 
 - **Custo da leitura sem cache.** A soma percorre as linhas do comerciante até a data, uma por dia com movimento. Cresce com o histórico, mas só acontece a cada TTL por data, por causa do cache de 60 s. O custo foi medido com 3 anos de histórico (seção abaixo).
 - **Invalidação grossa.** Qualquer evento avança a versão do comerciante inteiro, inclusive para datas anteriores à do lançamento, cujo valor não mudou. É mais invalidação do que o mínimo, e custa leituras ao banco que um `DEL` preciso evitaria. Em troca, a corrida de gravação atrasada deixa de existir e o código fica mais simples. O custo é por comerciante: o cache dos outros não é tocado. Se o histórico consultado de comerciantes muito ativos virar problema, a evolução é combinar a versão com snapshots (abaixo).
-- **Redis fora do ar na hora do evento.** Se o incremento da versão falhar (consumidor sem acesso ao Redis), entradas já em cache continuam sob a versão antiga e podem ser servidas até o TTL de 60 s. O consumidor registra o aviso e o processamento do evento não é desfeito. É o único caminho que ainda admite staleness, limitado ao TTL e restrito à falha do próprio Redis.
-- **Chaves antigas ocupam memória até o TTL.** Cada versão deixa chaves que expiram sozinhas em até 60 s; não há limpeza ativa.
+- **Redis fora do ar na hora do evento.** Se o incremento da versão falhar (consumidor sem acesso ao Redis), as entradas já em cache continuam sob a versão antiga. O consumidor registra o aviso e o processamento do evento não é desfeito. Enquanto o Redis está fora ninguém lê essas entradas (as leituras vão ao banco). Quando ele volta, a reconexão do cliente avança a **época**, que está na chave, e todo o cache anterior deixa de ser lido de uma vez. Antes da época, essa entrada podia ser servida até o TTL de 60 s depois da volta (45,8 s medidos no PowerShell, 39 s no bash); agora o cenário C do teste de resiliência converge em menos de 5 s.
+- **Limite da época.** Ela sobe quando o cliente de **um** processo reconecta. Se uma queda do Redis for percebida por alguns processos e não por outros (uma queda mais curta que a detecção de um deles, por exemplo), a época sobe pelos que perceberam e vale para todos, porque é global no Redis. Um Redis que perde os dados (reinício sem persistência) também zera as entradas, e a época nasce de novo com o relógio, como a versão.
+- **Chaves antigas ocupam memória até o TTL.** Cada versão e cada época deixam chaves que expiram sozinhas em até 60 s; não há limpeza ativa.
 - **Linha de progresso por comerciante** é um ponto de escrita compartilhado entre os eventos do mesmo comerciante. Como o upsert do saldo já serializa eventos da mesma data, e o consumidor processa uma mensagem por vez por réplica, a contenção é aceitável neste volume.
 
 ## Medição com histórico longo (3 anos)

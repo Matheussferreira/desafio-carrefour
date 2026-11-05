@@ -82,8 +82,8 @@ A tabela de cenários de falha em [arquitetura.md](arquitetura.md) liga cada fal
 **Resiliência** (stack real)
 
 - Cenário A: consolidado parado, `N` lançamentos (padrão 30), todos com 201; os eventos ficam na fila; ao voltar, o saldo é igual a `N x 10.00`.
-- Cenário B: RabbitMQ parado, `N` lançamentos, todos com 201; o outbox acumula pelo menos `N` pendentes; ao voltar, o relay drena e o saldo converge.
-- Cenário C: Redis parado. `/ready` do consolidado segue 200, o GET devolve 200 vindo do banco em menos de 3 s, `N` lançamentos novos são aplicados e aparecem no GET; mede a defasagem do cache depois da volta do Redis.
+- Cenário B: RabbitMQ parado, `N` lançamentos, todos com 201; o outbox acumula pelo menos `N` pendentes; ao voltar, o relay drena em menos de 15 s a partir do broker saudável e o saldo converge.
+- Cenário C: Redis parado. `/ready` do consolidado segue 200, o GET devolve 200 vindo do banco em menos de 3 s, `N` lançamentos novos são aplicados e aparecem no GET; depois da volta do Redis o GET mostra o saldo correto em menos de 5 s (a reconexão sobe a época do cache).
 - Cenário D: o banco do consolidado fica fora por 30 s (só ele; o de lançamentos segue no ar). Lançamentos 201, `/ready` do consolidado 503, a fila retém as mensagens, a DLQ não recebe nenhuma e o saldo converge na volta.
 - Cenário E: uma mensagem válida e uma quebrada na DLQ; `scripts/reprocessar-dlq` devolve as duas, a válida é aplicada e a quebrada volta para a DLQ.
 
@@ -102,7 +102,26 @@ A tabela de cenários de falha em [arquitetura.md](arquitetura.md) liga cada fal
 ## Limites deste conjunto de testes
 
 - Não há teste de lentidão do Postgres, só de queda. A queda do Redis está coberta (cenário C e `redis-fora.test.ts`).
-- Depois que o Redis volta, uma entrada de cache antiga que tenha sobrevivido à parada pode ser servida até o TTL de 60 s, porque os eventos aplicados sem o Redis não avançam a versão do cache. O cenário C mede essa janela (45,8 s na execução em PowerShell e 39 s na em bash); a correção (descartar o cache quando o Redis reconecta) está em [evolucoes.md](evolucoes.md).
+- O cenário C não cria, de propósito, uma entrada de cache antiga que sobreviva à parada; a prova de que a época invalida o cache está em `redis-fora.test.ts` (entrada velha gravada, cliente reconecta, a leitura seguinte vem do banco). Antes da época, essa janela chegou a 45,8 s no PowerShell e 39 s no bash (TTL de 60 s).
+- A drenagem do outbox é medida a partir do broker saudável. A subida do próprio RabbitMQ no Docker Desktop não é da solução e variou de 31 a 53 s. Além disso, o healthcheck do broker é posterior à abertura da porta, então parte da reconexão do relay (teto de 5 s) já aconteceu quando o cronômetro começa; a tabela abaixo mostra as duas medidas.
+
+### Cenário B, três execuções em PowerShell (após o teto de 5 s no backoff do relay)
+
+| Execução | Tempo total desde o start do RabbitMQ (subida + drenagem) | Subida do broker até saudável | Drenagem desde o broker saudável | Limite da drenagem |
+|---|---|---|---|---|
+| 1 | 53,5 s | 52,8 s | 0,7 s | 15 s |
+| 2 | 31,7 s | 31,2 s | 0,5 s | 15 s |
+| 3 | 31,9 s | 31,4 s | 0,5 s | 15 s |
+
+O total é a soma das duas medidas que o script registra. Antes da mudança, a mesma medição desde o start dava 38,5, 40, 46 e 75,6 s, e uma execução de verificação feita com o teto de 5 s e o cronômetro antigo deu 31,4 s: a diferença estava na subida do broker, não no relay. Em uma sondagem do log do relay nessa execução, a reconexão aconteceu cerca de 2 s depois de o RabbitMQ abrir a porta. Evidências: `docs/evidencias/resiliencia-ps1-20261105-193056.txt`, `-193337.txt` e `-193611.txt`. A execução com a régua antiga (broker não esperado, 31,4 s e falha do limite de 15 s) está em `resiliencia-ps1-20261105-192733.txt`. Em bash, com a mesma régua: subida do broker 45 s, drenagem 1 s (resolução de 1 s), cenário C com 0 s de defasagem, todas as verificações passaram (`resiliencia-sh-20261105-193911.txt`).
+
+### Cenário C, três execuções em PowerShell
+
+| Execução | Defasagem do cache depois da volta do Redis | Limite |
+|---|---|---|
+| 1 | 0 s | 5 s |
+| 2 | 0,1 s | 5 s |
+| 3 | 0,1 s | 5 s |
 - Não há teste de carga sobre o lançamentos. O requisito de 50 req/s é do consolidado.
 - **Regressão de latência encontrada e tratada.** Depois da fase 4, o k6 completo passou a falhar (p95 de segundos). Não consegui provar uma causa única: o bisect não achou um commit estável e a degradação também apareceu com o tracing desligado. Foram corrigidos os custos comprovados (tracing desligado por padrão no compose, healthcheck do RabbitMQ por porta) e as latências por cenário voltaram à casa de dezenas de milissegundos ou menos nas três execuções finais. Investigação completa em `evidencias/regressao-latencia.txt`.
 - **Picos isolados de latência (limitação conhecida).** Nas três execuções finais a mediana ficou em cerca de 5 ms, mas houve requisições isoladas lentas (máximo de 3,84 s, 1,49 s e 2,28 s) e, na execução 3, p95 de 141,74 ms no `cache_hit`, com 71 checagens acima de 500 ms. Não identifiquei a causa e não atribuo uma. Os limites de p95 de 500 ms passaram nas três.

@@ -38,7 +38,7 @@ GET /consolidado/:data
   └─ Redis DOWN → fallback direto no Postgres, sem erro para o cliente
 ```
 
-Invalidação ativa: ao processar um `LancamentoRegistrado`, o consumer avança, após o COMMIT, a versão do cache do comerciante (contador no Redis incluído na chave `saldo:{comerciante}:v{versao}:{data}`). O próximo request usa a versão nova, vai ao banco e repopula o cache. Detalhes, inclusive a corrida que isso elimina, no ADR-009.
+Invalidação ativa: ao processar um `LancamentoRegistrado`, o consumer avança, após o COMMIT, a versão do cache do comerciante (contador no Redis incluído na chave `saldo:e{epoca}:{comerciante}:v{versao}:{data}`; a época é um contador global que sobe quando o cliente Redis reconecta). O próximo request usa a versão nova, vai ao banco e repopula o cache. Detalhes, inclusive a corrida que isso elimina, no ADR-009.
 
 ---
 
@@ -60,7 +60,7 @@ O consumer atualiza Redis e Postgres na mesma operação de processamento do eve
 
 Aumentaria hit rate mas manteria o saldo stale por mais tempo após um lançamento.
 
-**Descartado:** Com invalidação ativa por evento, o TTL de 60s serve apenas como fallback de segurança (ex: se o avanço da versão do cache falhar por indisponibilidade temporária do Redis). Um TTL de 60s é um equilíbrio razoável entre consistência e proteção contra eventos de invalidação perdidos.
+**Descartado:** Com invalidação ativa por evento, o TTL de 60s serve apenas como fallback de segurança (por exemplo, entradas que escaparem da época e da versão). Um TTL de 60s é um equilíbrio razoável entre consistência e proteção contra eventos de invalidação perdidos.
 
 ### Redis como broker (Redis Streams)
 

@@ -155,9 +155,13 @@ Log "  eventos pendentes no outbox: $pend"
 Verificar ($pend -ge $Quantidade) 'o outbox acumulou os eventos que não puderam ser publicados'
 $pronto = try { (Invoke-WebRequest -UseBasicParsing "$LancamentosUrl/ready").StatusCode } catch { [int]$_.Exception.Response.StatusCode }
 Verificar ($pronto -eq 200) "API de lançamentos segue pronta (/ready = $pronto)"
-docker compose start rabbitmq | Out-Null
+# O cronômetro da drenagem começa quando o broker está saudável: a subida do RabbitMQ em si
+# (dezenas de segundos) não depende desta solução e é registrada à parte.
+$subida = [Diagnostics.Stopwatch]::StartNew()
+docker compose up -d --wait rabbitmq | Out-Null
+Log ("  rabbitmq saudável depois de {0} s" -f [math]::Round($subida.Elapsed.TotalSeconds, 1))
 $tDreno = EsperarOutboxVazio
-Verificar ($tDreno -ge 0) "outbox drenou depois que o broker voltou (em $tDreno s)"
+Verificar (($tDreno -ge 0) -and ($tDreno -lt 15)) "outbox drenou em menos de 15 s depois que o broker voltou (em $tDreno s)"
 $t = EsperarSaldo $dataB $esperado
 Verificar ($t -ge 0) "saldo convergiu para $esperado (em $t s)"
 Log ''
@@ -186,11 +190,11 @@ $t = EsperarSaldo $dataC ($esperado * 2)
 Verificar ($t -ge 0) "o consumidor aplicou os eventos novos sem o Redis e o GET mostra $($esperado * 2) (em $t s)"
 docker compose up -d --wait redis | Out-Null
 Log '  redis de volta'
-# Os eventos aplicados com o Redis fora não avançaram a versão do cache; se uma entrada antiga
-# sobreviveu à parada, ela pode ser servida até o TTL (60 s). Mede o quanto isso dura.
+# Os eventos aplicados com o Redis fora não avançaram a versão do cache; a reconexão sobe a época
+# do cache, então uma entrada antiga que sobreviveu à parada não pode mais ser servida.
 $t = EsperarSaldo $dataC ($esperado * 2)
-Log "  defasagem do cache depois da volta do Redis: $t s (limite: TTL de 60 s)"
-Verificar (($t -ge 0) -and ($t -le 75)) 'depois da volta do Redis o GET mostra o saldo correto dentro do TTL do cache'
+Log "  defasagem do cache depois da volta do Redis: $t s (limite: 5 s)"
+Verificar (($t -ge 0) -and ($t -lt 5)) 'depois da volta do Redis o GET mostra o saldo correto em menos de 5 s'
 Log ''
 
 # --- Cenário D: banco do consolidado fora por 30 s ---------------------------------------------

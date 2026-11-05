@@ -14,7 +14,8 @@ import {
   gravarSaldo,
   lerUltimoEventoAplicadoEm,
   lerSaldo,
-  versaoAtual,
+  referenciaAtual,
+  type ReferenciaCache,
 } from '../cache/saldoCache';
 import { sendProblem } from '../http/problem';
 
@@ -88,10 +89,10 @@ router.get('/:data', async (req: Request, res: Response, next: NextFunction) => 
     // 1. Cache por comerciante, versão e data. A versão é lida ANTES de consultar o banco: se um
     //    evento for aplicado enquanto esta leitura está em andamento, a gravação abaixo cai numa
     //    versão velha, que ninguém mais lê. Falha do Redis não derruba a leitura.
-    let versao: string | null = null;
+    let ref: ReferenciaCache | null = null;
     try {
-      versao = await versaoAtual(comercianteId);
-      saldo = await lerSaldo<SaldoDia>(comercianteId, versao, data);
+      ref = await referenciaAtual(comercianteId);
+      saldo = await lerSaldo<SaldoDia>(comercianteId, ref, data);
     } catch (cacheErr) {
       logger.warn({ cacheErr }, 'Redis unavailable, falling back to database');
     }
@@ -100,9 +101,9 @@ router.get('/:data', async (req: Request, res: Response, next: NextFunction) => 
     if (!saldo) {
       source = 'database';
       saldo = await consultarDia(pool, comercianteId, data);
-      if (versao !== null) {
+      if (ref !== null) {
         try {
-          await gravarSaldo(comercianteId, versao, data, saldo);
+          await gravarSaldo(comercianteId, ref, data, saldo);
         } catch {
           // não bloqueia a resposta
         }

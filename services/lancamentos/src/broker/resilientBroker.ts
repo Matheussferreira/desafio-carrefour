@@ -10,6 +10,10 @@ export interface BrokerOptions<C extends Channel> {
   preparar: (canal: C) => Promise<void>;
 }
 
+// Teto da espera entre tentativas de reconexão: o broker costuma voltar em segundos, e uma espera
+// longa só atrasa a drenagem do outbox.
+const ESPERA_MAXIMA_MS = 5_000;
+
 function comHeartbeat(url: string): string {
   const u = new URL(url);
   if (!u.searchParams.has('heartbeat')) u.searchParams.set('heartbeat', '15');
@@ -106,7 +110,7 @@ export class ResilientBroker<C extends Channel> extends EventEmitter {
 
   private agendar(): void {
     if (this.parado) return;
-    const espera = backoffDelay(this.tentativa++);
+    const espera = backoffDelay(this.tentativa++, 500, ESPERA_MAXIMA_MS);
     this.timer = setTimeout(() => void this.conectar(), espera);
   }
 }

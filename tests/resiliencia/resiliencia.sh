@@ -148,10 +148,15 @@ verificar $ok "o outbox acumulou os eventos que não puderam ser publicados"
 pronto=$(curl -s -o /dev/null -w '%{http_code}' "$LANCAMENTOS_URL/ready")
 [ "$pronto" = "200" ] && ok=1 || ok=0
 verificar $ok "API de lançamentos segue pronta (/ready = $pronto)"
-docker compose start rabbitmq >/dev/null
+# O cronômetro da drenagem começa quando o broker está saudável: a subida do RabbitMQ em si
+# (dezenas de segundos) não depende desta solução e é registrada à parte.
+subida_ini=$(date +%s)
+docker compose up -d --wait rabbitmq >/dev/null
+log "  rabbitmq saudável depois de $(( $(date +%s) - subida_ini )) s"
 t="$(esperar_outbox_vazio)"
 [ "$t" -ge 0 ] && ok=1 || ok=0
-verificar $ok "outbox drenou depois que o broker voltou (em $t s)"
+[ "$t" -ge 0 ] && [ "$t" -lt 15 ] && ok=1 || ok=0
+verificar $ok "outbox drenou em menos de 15 s depois que o broker voltou (em $t s)"
 t="$(esperar_saldo "$DIA_B" "$ESPERADO")"
 [ "$t" -ge 0 ] && ok=1 || ok=0
 verificar $ok "saldo convergiu para $ESPERADO (em $t s)"
@@ -188,12 +193,12 @@ t="$(esperar_saldo "$DIA_C" "$((ESPERADO * 2))")"
 verificar $ok "o consumidor aplicou os eventos novos sem o Redis e o GET mostra $((ESPERADO * 2)) (em $t s)"
 docker compose up -d --wait redis >/dev/null
 log "  redis de volta"
-# Os eventos aplicados com o Redis fora não avançaram a versão do cache; se uma entrada antiga
-# sobreviveu à parada, ela pode ser servida até o TTL (60 s). Mede o quanto isso dura.
+# Os eventos aplicados com o Redis fora não avançaram a versão do cache; a reconexão sobe a época
+# do cache, então uma entrada antiga que sobreviveu à parada não pode mais ser servida.
 t="$(esperar_saldo "$DIA_C" "$((ESPERADO * 2))")"
-log "  defasagem do cache depois da volta do Redis: $t s (limite: TTL de 60 s)"
-[ "$t" -ge 0 ] && [ "$t" -le 75 ] && ok=1 || ok=0
-verificar $ok "depois da volta do Redis o GET mostra o saldo correto dentro do TTL do cache"
+log "  defasagem do cache depois da volta do Redis: $t s (limite: 5 s)"
+[ "$t" -ge 0 ] && [ "$t" -lt 5 ] && ok=1 || ok=0
+verificar $ok "depois da volta do Redis o GET mostra o saldo correto em menos de 5 s"
 log ""
 
 # --- Cenário D: banco do consolidado fora por 30 s ---

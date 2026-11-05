@@ -6,7 +6,7 @@
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import app from '../../src/app';
-import { chaveSaldo, gravarSaldo, versaoAtual } from '../../src/cache/saldoCache';
+import { chaveSaldo, gravarSaldo, referenciaAtual, versaoAtual } from '../../src/cache/saldoCache';
 import { consultarDia } from '../../src/domain/saldoQueries';
 import { config } from '../../src/config';
 import { IdpDeTeste } from '../helpers/idp';
@@ -140,17 +140,17 @@ describe('Saldo por comerciante', () => {
       await aplicar('loja-race', dia, '100.00');
 
       // Leitor lento: lê a versão, consulta o banco (100.00) e ainda não gravou no cache
-      const versaoDoLeitor = await versaoAtual('loja-race');
+      const refDoLeitor = await referenciaAtual('loja-race');
       const valorAntigo = await consultarDia(pool, 'loja-race', dia);
       expect(valorAntigo.saldoAcumulado).toBe('100.00');
 
       // Enquanto isso, um evento é aplicado e invalida o cache do comerciante
       await aplicar('loja-race', dia, '50.00');
-      expect(await versaoAtual('loja-race')).not.toBe(versaoDoLeitor);
+      expect(await versaoAtual('loja-race')).not.toBe(refDoLeitor.versao);
 
       // A gravação atrasada do leitor lento acontece só agora, depois da invalidação
-      await gravarSaldo('loja-race', versaoDoLeitor, dia, valorAntigo);
-      expect(await getRedis().get(chaveSaldo('loja-race', versaoDoLeitor, dia))).not.toBeNull(); // está lá, mas...
+      await gravarSaldo('loja-race', refDoLeitor, dia, valorAntigo);
+      expect(await getRedis().get(chaveSaldo('loja-race', refDoLeitor, dia))).not.toBeNull(); // está lá, mas...
 
       // ...nenhuma leitura nova a enxerga
       const res = await consultar('loja-race', dia);

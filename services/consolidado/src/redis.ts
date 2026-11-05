@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 import { config } from './config';
 import { logger } from './logger';
+import { avancarEpoca } from './cache/saldoCache';
 
 let client: Redis | null = null;
 
@@ -30,7 +31,32 @@ function novoCliente(): Redis {
       logger.warn({ err: err.message }, 'Redis indisponível');
     }
   });
+  // Quando o Redis volta de uma queda, sobe a época do cache: entradas gravadas antes da queda
+  // deixam de ser lidas, mesmo que o consumidor tenha aplicado eventos sem conseguir avançar versões.
+  let caiu = false;
+  redis.on('close', () => {
+    if (client === redis) caiu = true;
+  });
+  redis.on('ready', () => {
+    if (!caiu || client !== redis) return;
+    caiu = false;
+    void avancarEpocaComTentativas(redis);
+  });
   return redis;
+}
+
+async function avancarEpocaComTentativas(redis: Redis): Promise<void> {
+  for (let tentativa = 1; tentativa <= 5; tentativa++) {
+    try {
+      const epoca = await avancarEpoca();
+      logger.info({ epoca }, 'Redis reconectado, época do cache avançada');
+      return;
+    } catch (err) {
+      if (client !== redis) return;
+      logger.warn({ err: (err as Error).message, tentativa }, 'Falha ao avançar a época do cache, nova tentativa');
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
 }
 
 export async function connectRedis(maxAttempts = 15, delayMs = 3000): Promise<void> {

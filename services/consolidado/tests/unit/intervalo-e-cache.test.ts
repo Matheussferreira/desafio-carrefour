@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
 import { IdpDeTeste } from '../helpers/idp';
-import { chaveSaldo, chaveUltimoEventoAplicadoEm, chaveVersao } from '../../src/cache/saldoCache';
+import { chaveEpoca, chaveSaldo, chaveUltimoEventoAplicadoEm, chaveVersao } from '../../src/cache/saldoCache';
 import { config } from '../../src/config';
 import { diasNoIntervalo } from '../../src/domain/data';
 
@@ -34,16 +34,23 @@ describe('diasNoIntervalo', () => {
   });
 });
 
+const r = (epoca: number, versao: number) => ({ epoca: String(epoca), versao: String(versao) });
+
 describe('chaves de cache', () => {
   it('são separadas por comerciante e carregam a versão', () => {
-    expect(chaveSaldo('loja-a', '7', '2026-06-15')).toBe('saldo:loja-a:v7:2026-06-15');
-    expect(chaveSaldo('loja-b', '7', '2026-06-15')).not.toBe(chaveSaldo('loja-a', '7', '2026-06-15'));
+    expect(chaveSaldo('loja-a', r(1, 7), '2026-06-15')).toBe('saldo:e1:loja-a:v7:2026-06-15');
+    expect(chaveSaldo('loja-b', r(1, 7), '2026-06-15')).not.toBe(chaveSaldo('loja-a', r(1, 7), '2026-06-15'));
     expect(chaveVersao('loja-a')).toBe('saldo:ver:loja-a');
     expect(chaveUltimoEventoAplicadoEm('loja-a')).toBe('saldo:ultimo:loja-a');
   });
 
   it('versões diferentes geram chaves diferentes para a mesma data', () => {
-    expect(chaveSaldo('loja-a', '7', '2026-06-15')).not.toBe(chaveSaldo('loja-a', '8', '2026-06-15'));
+    expect(chaveSaldo('loja-a', r(1, 7), '2026-06-15')).not.toBe(chaveSaldo('loja-a', r(1, 8), '2026-06-15'));
+  });
+
+  it('épocas diferentes geram chaves diferentes para o mesmo comerciante, versão e data', () => {
+    expect(chaveSaldo('loja-a', r(1, 7), '2026-06-15')).not.toBe(chaveSaldo('loja-a', r(2, 7), '2026-06-15'));
+    expect(chaveEpoca).toBe('saldo:epoca');
   });
 });
 
