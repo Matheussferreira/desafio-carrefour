@@ -17,7 +17,7 @@ A primeira versão do relay rodava dentro do processo da API de lançamentos, co
 - O relay passa a ser o processo `lancamentos-relay`, com a mesma imagem da API e outro comando de entrada. A API só escreve no banco e não conhece o RabbitMQ.
 - A publicação usa `ConfirmChannel` com `mandatory: true`. A linha só vira `publicado` depois que o broker confirma todas as mensagens do lote. Mensagem devolvida por falta de rota (fila ou binding ausente) é tratada como falha.
 - O lote é lido com `SELECT ... FOR UPDATE SKIP LOCKED` dentro de uma transação que só dá `COMMIT` depois dos acks. Qualquer falha desfaz a transação e as linhas continuam pendentes.
-- A conexão é mantida por um componente que reconecta com backoff exponencial e jitter, e o `/ready` do relay fica 503 enquanto o broker está fora.
+- A conexão é mantida por um componente que reconecta com backoff exponencial e jitter (teto de 5 s entre tentativas), e o `/ready` do relay fica 503 enquanto o broker está fora.
 
 ```mermaid
 sequenceDiagram
@@ -51,7 +51,7 @@ Funciona, mas serializa a publicação em uma réplica e desperdiça as demais. 
 
 **Positivas:**
 - Zero perda no trecho banco para broker: sem ack, o evento continua pendente.
-- Várias réplicas do relay dividem o trabalho sem duplicar, comprovado por teste de integração com 3 relays e 200 eventos contra um RabbitMQ real.
+- Várias réplicas do relay dividem o trabalho sem duplicar, comprovado por teste de integração com 3 relays e 200 eventos contra um RabbitMQ real. O que garante **não duplicar** é o bloqueio de linha dentro da transação (sem `SKIP LOCKED`, um relay esperaria o outro terminar e depois veria as linhas já publicadas); o `SKIP LOCKED` garante o **paralelismo**: o relay pula as linhas que outro está publicando em vez de esperar. Os dois comportamentos têm teste, e o do paralelismo falha se a cláusula for removida (o teste de 3 relays sozinho não detecta essa remoção).
 - A API de lançamentos continua pronta e aceitando escritas com o RabbitMQ fora do ar; os eventos ficam pendentes no outbox.
 - Queda e retorno do broker são recuperados sem reiniciar processos.
 

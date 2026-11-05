@@ -92,6 +92,37 @@ describe('confirmação do broker', () => {
     expect(await relayTick({ pool, canal: canalQueConfirma, tamanhoLote: 3 })).toBe(3);
     expect(await contarPorStatus()).toEqual({ pendente: 4, publicado: 3 });
   });
+
+  it('pula as linhas que outro relay está publicando, sem esperar por elas (SKIP LOCKED)', async () => {
+    await semear(10);
+    const outroRelay = await pool.connect();
+    try {
+      // Outro relay no meio de uma publicação: segura as 4 linhas mais antigas
+      await outroRelay.query('BEGIN');
+      const { rows: travadas } = await outroRelay.query<{ id: string }>(
+        "SELECT id FROM outbox WHERE status = 'pendente' ORDER BY created_at, id LIMIT 4 FOR UPDATE",
+      );
+      expect(travadas).toHaveLength(4);
+
+      // Sem SKIP LOCKED este relay ficaria bloqueado nas linhas travadas até o outro terminar
+      const publicados = await Promise.race([
+        relayTick({ pool, canal: canalQueConfirma }),
+        new Promise<number>((_, rejeitar) =>
+          setTimeout(() => rejeitar(new Error('o relay ficou esperando linhas travadas por outro relay')), 3_000),
+        ),
+      ]);
+      expect(publicados).toBe(6);
+
+      const { rows } = await pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM outbox WHERE status = 'pendente' AND id = ANY($1::uuid[])",
+        [travadas.map(r => r.id)],
+      );
+      expect(rows[0].n).toBe(4); // as travadas continuam pendentes, nenhuma foi publicada duas vezes
+    } finally {
+      await outroRelay.query('ROLLBACK');
+      outroRelay.release();
+    }
+  });
 });
 
 describe('relays concorrentes contra o RabbitMQ real', () => {
