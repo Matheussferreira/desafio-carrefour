@@ -4,10 +4,13 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    # Fuso de negócio também no banco (CURRENT_DATE, now()::date e logs).
+    command: ["postgres", "-c", "timezone=America/Sao_Paulo", "-c", "log_timezone=America/Sao_Paulo"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: postgres
+      TZ: America/Sao_Paulo
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-databases.sql:/docker-entrypoint-initdb.d/00-init.sql
@@ -22,11 +25,18 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    # Hostname fixo: o nome do nó do RabbitMQ deriva dele. Sem isso, cada container novo
+    # ganha um nome diferente e não reaproveita o estado gravado no volume.
+    hostname: rabbitmq-local
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rabbit}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-rabbit}
+      # Cookie definido pelo entrypoint com dono e permissão corretos.
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-cookie-local-dev}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -48,7 +58,9 @@ services:
 
   # ─── Serviços de negócio ───────────────────────────────────────────────────
 
+  # API de lançamentos: só depende do banco. Não fala com o RabbitMQ.
   lancamentos:
+    image: caixa/lancamentos:local
     build:
       context: ./services/lancamentos
       dockerfile: Dockerfile
@@ -56,7 +68,6 @@ services:
       NODE_ENV: production
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lancamentos_db
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-rabbit}:${RABBITMQ_PASS:-rabbit}@rabbitmq:5672
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
       TZ: America/Sao_Paulo
     ports:
@@ -64,8 +75,42 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/ready > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # Publica o outbox no RabbitMQ. Mesma imagem da API, outro processo; pode ter várias réplicas.
+  lancamentos-relay:
+    image: caixa/lancamentos:local
+    build:
+      context: ./services/lancamentos
+      dockerfile: Dockerfile
+    command: ["node", "dist/relayMain.js"]
+    environment:
+      NODE_ENV: production
+      RELAY_PORT: 3003
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lancamentos_db
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-rabbit}:${RABBITMQ_PASS:-rabbit}@rabbitmq:5672
+      TZ: America/Sao_Paulo
+    # Sem porta publicada no host de propósito: assim dá para subir várias réplicas
+    # (docker compose up -d --scale lancamentos-relay=3). Saúde e métricas ficam na rede interna.
+    expose:
+      - "3003"
+    depends_on:
+      lancamentos:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/ready > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
 
   consolidado:
@@ -89,6 +134,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/ready > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
 
   # ─── Teste de carga (profile opcional) ────────────────────────────────────
@@ -103,8 +154,10 @@ services:
       CONSOLIDADO_URL: http://consolidado:3002
     command: run /scripts/consolidado.js
     depends_on:
-      - lancamentos
-      - consolidado
+      lancamentos:
+        condition: service_healthy
+      consolidado:
+        condition: service_healthy
 
   # ─── Observabilidade (profile opcional) ───────────────────────────────────
 
@@ -131,4 +184,5 @@ services:
 
 volumes:
   postgres_data:
+  rabbitmq_data:
   grafana_data:

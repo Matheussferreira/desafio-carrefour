@@ -8,6 +8,7 @@ name: desafio-as-it
 services:
   postgres-it:
     image: postgres:16-alpine
+    command: ["postgres", "-c", "timezone=America/Sao_Paulo"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -27,9 +28,11 @@ services:
 
   rabbitmq-it:
     image: rabbitmq:3.13-alpine
+    hostname: rabbitmq-it
     environment:
       RABBITMQ_DEFAULT_USER: rabbit
       RABBITMQ_DEFAULT_PASS: rabbit
+      RABBITMQ_ERLANG_COOKIE: cookie-it
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 5s

@@ -11,3 +11,8 @@ scrape_configs:
     static_configs:
       - targets: ['consolidado:3002']
     metrics_path: /metrics
+
+  - job_name: lancamentos-relay
+    static_configs:
+      - targets: ['lancamentos-relay:3003']
+    metrics_path: /metrics

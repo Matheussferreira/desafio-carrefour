@@ -104,7 +104,7 @@ export function setup() {
     const res = http.post(
       `${LANCAMENTOS_URL}/lancamentos`,
       JSON.stringify({
-        valor: 100 + i * 10,
+        valor: (100 + i * 10).toFixed(2),
         tipo: i % 2 === 0 ? 'credito' : 'debito',
         descricao: `seed-hit-${i}`,
         data: TEST_DATE,
@@ -122,7 +122,7 @@ export function setup() {
     const res = http.post(
       `${LANCAMENTOS_URL}/lancamentos`,
       JSON.stringify({
-        valor: 200 + i,
+        valor: (200 + i).toFixed(2),
         tipo: 'credito',
         descricao: `seed-miss-${i}`,
         data: CACHE_MISS_DATES[i],
