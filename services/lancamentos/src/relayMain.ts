@@ -1,3 +1,4 @@
+import { encerrarTracing } from './tracing';
 import type { ConfirmChannel, Message } from 'amqplib';
 import express from 'express';
 import { config } from './config';
@@ -5,7 +6,7 @@ import { logger } from './logger';
 import { pool, waitForDb } from './db';
 import { criarBroker } from './rabbitmq';
 import { iniciarLoopRelay, relayTick } from './relay/outboxRelay';
-import { register } from './metrics';
+import { register, registrarGaugesOutbox } from './metrics';
 
 // Processo separado da API: publica o outbox no RabbitMQ.
 // Pode ser escalado sem duplicar eventos (FOR UPDATE SKIP LOCKED).
@@ -37,6 +38,15 @@ async function main(): Promise<void> {
     },
   });
 
+  registrarGaugesOutbox(async () => {
+    const { rows } = await pool.query<{ pendentes: number; idade: number }>(
+      `SELECT count(*)::int AS pendentes,
+              COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)::float AS idade
+       FROM outbox WHERE status = 'pendente'`,
+    );
+    return { pendentes: rows[0].pendentes, idadeMaisAntigaSegundos: rows[0].idade };
+  });
+
   const app = express();
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'lancamentos-relay' });
@@ -65,6 +75,7 @@ async function main(): Promise<void> {
     await broker.close();
     server.close();
     await pool.end();
+    await encerrarTracing();
     clearTimeout(forcar);
     process.exit(0);
   };

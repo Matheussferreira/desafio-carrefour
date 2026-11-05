@@ -12,7 +12,7 @@ import { config } from '../../src/config';
 import { IdpDeTeste } from '../helpers/idp';
 import { pool } from '../../src/db';
 import { getRedis } from '../../src/redis';
-import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEAguardar } from './helpers';
+import { encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEAguardar } from './helpers';
 
 const idp = new IdpDeTeste();
 const COMERCIANTES = [

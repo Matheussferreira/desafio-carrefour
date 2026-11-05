@@ -100,6 +100,9 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/caixa
       OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
       OIDC_AUDIENCE: lancamentos-api
+      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: lancamentos
       TZ: America/Sao_Paulo
     ports:
       - "3001:3001"
@@ -126,6 +129,9 @@ services:
       RELAY_PORT: 3003
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lancamentos_db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-rabbit}:${RABBITMQ_PASS:-rabbit}@rabbitmq:5672
+      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: lancamentos-relay
       TZ: America/Sao_Paulo
     # Sem porta publicada no host de propósito: assim dá para subir várias réplicas
     # (docker compose up -d --scale lancamentos-relay=3). Saúde e métricas ficam na rede interna.
@@ -157,6 +163,9 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/caixa
       OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
       OIDC_AUDIENCE: consolidado-api
+      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: consolidado
       TZ: America/Sao_Paulo
     ports:
       - "3002:3002"
@@ -207,6 +216,16 @@ services:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
+
+  # Traces (OTLP/HTTP na 4318, interface na 16686). Armazenamento em memória: some ao reiniciar.
+  jaeger:
+    image: jaegertracing/all-in-one:1.58.0
+    profiles: ["observability"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "20000"
+    ports:
+      - "16686:16686"
 
   grafana:
     image: grafana/grafana:11.1.0

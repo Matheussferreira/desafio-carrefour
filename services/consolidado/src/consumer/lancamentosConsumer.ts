@@ -1,13 +1,16 @@
+import { SpanKind } from '@opentelemetry/api';
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { QUEUE } from '../rabbitmq';
 import type { ResilientBroker } from '../broker/resilientBroker';
 import { pool } from '../db';
 import { avancarVersao, gravarUltimoEventoAplicadoEm } from '../cache/saldoCache';
 import { logger } from '../logger';
+import { emSpan } from '../telemetria';
 import {
   eventsProcessedTotal,
   consumerRetriesTotal,
   consumerDlqTotal,
+  eventoLagSegundos,
 } from '../metrics';
 import { withRetry } from '../utils/retry';
 import { calcularDelta, EventoLancamentoRegistrado, interpretarMensagem } from '../domain/evento';
@@ -106,7 +109,17 @@ let canalAtivo: Channel | null = null;
 let inFlight = 0;
 let shuttingDown = false;
 
-async function tratar(ch: Channel, msg: ConsumeMessage): Promise<void> {
+/** Trata uma mensagem dentro de um span que continua o trace de quem publicou (cabeçalho traceparent). */
+function tratar(ch: Channel, msg: ConsumeMessage): Promise<void> {
+  const traceparent = msg.properties.headers?.traceparent as string | undefined;
+  return emSpan(
+    'consolidado.lancamentos processar',
+    { kind: SpanKind.CONSUMER, traceparent, atributos: { 'messaging.system': 'rabbitmq', 'messaging.destination.name': QUEUE } },
+    () => tratarMensagem(ch, msg),
+  );
+}
+
+async function tratarMensagem(ch: Channel, msg: ConsumeMessage): Promise<void> {
   // Durante shutdown: devolve a mensagem para a fila
   if (shuttingDown) {
     seguro(() => ch.nack(msg, false, true));
@@ -147,6 +160,9 @@ async function tratar(ch: Channel, msg: ConsumeMessage): Promise<void> {
 
     if (result.ok) {
       eventsProcessedTotal.inc({ tipo: 'LancamentoRegistrado', status: result.value });
+      if (result.value === 'processed' && evento.createdAt) {
+        eventoLagSegundos.observe(Math.max(0, (Date.now() - Date.parse(evento.createdAt)) / 1000));
+      }
       seguro(() => ch.ack(msg));
     } else {
       log.error({ error: result.error }, 'Max retries exceeded, sending to DLQ');

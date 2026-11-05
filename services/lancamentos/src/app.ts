@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { logger } from './logger';
 import { rateLimiter } from './middleware/rateLimit';
+import { metricasHttp } from './middleware/metricasHttp';
 import { authMiddleware } from './middleware/auth';
 import healthRouter from './routes/health';
 import lancamentosRouter from './routes/lancamentos';
@@ -10,6 +11,8 @@ import { register } from './metrics';
 import { errorHandler, notFoundHandler } from './http/problem';
 
 const app = express();
+
+app.use(metricasHttp);
 
 // API JSON pura: cabeçalhos de segurança do helmet e corpo limitado (um lançamento tem poucas centenas de bytes)
 app.disable('x-powered-by');

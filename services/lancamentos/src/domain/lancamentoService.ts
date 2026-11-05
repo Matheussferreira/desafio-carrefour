@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { traceparentAtual } from '../telemetria';
 import { hashCorpo, NovoLancamento } from './lancamento';
 
 export interface LancamentoRow {
@@ -87,8 +88,8 @@ export async function registrarLancamento(
     };
 
     await client.query(
-      'INSERT INTO outbox (id, tipo_evento, payload) VALUES ($1, $2, $3)',
-      [eventoId, 'LancamentoRegistrado', JSON.stringify(payload)],
+      'INSERT INTO outbox (id, tipo_evento, payload, traceparent) VALUES ($1, $2, $3, $4)',
+      [eventoId, 'LancamentoRegistrado', JSON.stringify(payload), traceparentAtual()],
     );
     await client.query('COMMIT');
     return { criado: true, lancamento };

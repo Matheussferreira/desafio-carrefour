@@ -58,6 +58,14 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_lancamentos_comerciante_data ON lancamentos (comerciante_id, data);
     `,
   },
+  {
+    // Contexto de trace (W3C traceparent) da requisição que gerou o evento. O relay o usa para
+    // continuar o mesmo trace ao publicar, mesmo que isso aconteça segundos depois.
+    name: '004_outbox_traceparent',
+    sql: `
+      ALTER TABLE outbox ADD COLUMN IF NOT EXISTS traceparent TEXT;
+    `,
+  },
 ];
 
 /** Aplica as migrations pendentes. O parâmetro `ate` (nome da migration) existe para testar upgrades. */

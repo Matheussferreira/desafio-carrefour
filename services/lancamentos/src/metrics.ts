@@ -42,3 +42,28 @@ export const rabbitmqConnected = new Gauge({
   help: '1 quando a conexão do relay com o RabbitMQ está de pé, 0 caso contrário',
   registers: [register],
 });
+
+/**
+ * Gauges do estado do outbox, calculados a cada scrape. Só o processo do relay os registra,
+ * para a API não consultar o banco por conta do Prometheus.
+ */
+export function registrarGaugesOutbox(
+  consultar: () => Promise<{ pendentes: number; idadeMaisAntigaSegundos: number }>,
+): void {
+  new Gauge({
+    name: 'lancamentos_outbox_pendentes',
+    help: 'Eventos no outbox ainda não publicados e confirmados pelo broker',
+    registers: [register],
+    async collect() {
+      this.set((await consultar()).pendentes);
+    },
+  });
+  new Gauge({
+    name: 'lancamentos_outbox_idade_mais_antigo_segundos',
+    help: 'Idade do evento pendente mais antigo do outbox (0 quando não há pendentes)',
+    registers: [register],
+    async collect() {
+      this.set((await consultar()).idadeMaisAntigaSegundos);
+    },
+  });
+}

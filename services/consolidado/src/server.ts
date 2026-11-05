@@ -1,3 +1,4 @@
+import { encerrarTracing } from './tracing';
 import app from './app';
 import { config } from './config';
 import { logger } from './logger';
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
       await broker.close();
       await closeRedis();
       await pool.end();
+      await encerrarTracing();
       clearTimeout(forcar);
       logger.info('Shutdown complete');
       process.exit(0);

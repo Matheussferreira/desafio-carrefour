@@ -1,3 +1,4 @@
+import { encerrarTracing } from './tracing';
 import app from './app';
 import { config } from './config';
 import { logger } from './logger';
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
     const forcar = setTimeout(() => process.exit(1), 10_000);
     server.close(async () => {
       await pool.end();
+      await encerrarTracing();
       clearTimeout(forcar);
       logger.info('Shutdown complete');
       process.exit(0);

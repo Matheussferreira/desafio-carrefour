@@ -42,3 +42,10 @@ export const rabbitmqConnected = new Gauge({
   help: '1 quando a conexão do consumidor com o RabbitMQ está de pé, 0 caso contrário',
   registers: [register],
 });
+
+export const eventoLagSegundos = new Histogram({
+  name: 'consolidado_evento_lag_seconds',
+  help: 'Tempo entre a criação do evento (createdAt) e a aplicação ao saldo, em segundos',
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300],
+  registers: [register],
+});

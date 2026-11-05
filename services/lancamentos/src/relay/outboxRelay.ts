@@ -1,7 +1,9 @@
+import { SpanKind } from '@opentelemetry/api';
 import type { Options } from 'amqplib';
 import { Pool } from 'pg';
 import { EXCHANGE, ROUTING_KEY } from '../rabbitmq';
 import { logger } from '../logger';
+import { emSpan, traceparentAtual } from '../telemetria';
 import { outboxEventsPublishedTotal, outboxPublishFailuresTotal } from '../metrics';
 
 /** O que o relay precisa do canal: publicar com callback de confirmação (ConfirmChannel). */
@@ -27,6 +29,7 @@ interface LinhaOutbox {
   id: string;
   tipo_evento: string;
   payload: object;
+  traceparent: string | null;
 }
 
 /**
@@ -42,7 +45,7 @@ export async function relayTick(deps: RelayDeps): Promise<number> {
   try {
     await client.query('BEGIN');
     const { rows } = await client.query<LinhaOutbox>(
-      `SELECT id, tipo_evento, payload
+      `SELECT id, tipo_evento, payload, traceparent
        FROM outbox
        WHERE status = 'pendente'
        ORDER BY created_at, id
@@ -57,17 +60,37 @@ export async function relayTick(deps: RelayDeps): Promise<number> {
     }
 
     const resultados = await Promise.allSettled(
-      rows.map(
-        row =>
-          new Promise<void>((resolve, reject) => {
-            deps.canal.publish(
-              EXCHANGE,
-              ROUTING_KEY,
-              Buffer.from(JSON.stringify(row.payload)),
-              { persistent: true, mandatory: true, messageId: row.id, contentType: 'application/json' },
-              err => (err ? reject(err) : resolve()),
-            );
-          }),
+      rows.map(row =>
+        // O span continua o trace da requisição que gravou o evento e cobre a confirmação do broker
+        emSpan(
+          'outbox publicar',
+          {
+            kind: SpanKind.PRODUCER,
+            traceparent: row.traceparent,
+            atributos: {
+              'messaging.system': 'rabbitmq',
+              'messaging.destination.name': EXCHANGE,
+              'messaging.message.id': row.id,
+            },
+          },
+          () =>
+            new Promise<void>((resolve, reject) => {
+              const tp = traceparentAtual();
+              deps.canal.publish(
+                EXCHANGE,
+                ROUTING_KEY,
+                Buffer.from(JSON.stringify(row.payload)),
+                {
+                  persistent: true,
+                  mandatory: true,
+                  messageId: row.id,
+                  contentType: 'application/json',
+                  ...(tp ? { headers: { traceparent: tp } } : {}),
+                },
+                err => (err ? reject(err) : resolve()),
+              );
+            }),
+        ),
       ),
     );
 
