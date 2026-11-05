@@ -1,150 +1,73 @@
-import { Router, Request, Response } from 'express';
-import { z } from 'zod';
+import { NextFunction, Request, Response, Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import Decimal from 'decimal.js';
 import { pool } from '../db';
 import { logger } from '../logger';
 import { lancamentosCreatedTotal } from '../metrics';
+import { isDataReal } from '../domain/data';
+import { lancamentoSchema } from '../domain/lancamento';
+import { ConflitoIdempotenciaError, registrarLancamento } from '../domain/lancamentoService';
+import { sendProblem } from '../http/problem';
 
 const router = Router();
 
-const lancamentoSchema = z.object({
-  valor: z
-    .number({ required_error: 'valor é obrigatório' })
-    .positive('valor deve ser positivo'),
-  tipo: z.enum(['credito', 'debito'], {
-    required_error: 'tipo deve ser "credito" ou "debito"',
-  }),
-  descricao: z.string().max(500).optional(),
-  data: z
-    .string({ required_error: 'data é obrigatória' })
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'data deve estar no formato YYYY-MM-DD'),
-});
+const COLUNAS = 'id, valor, tipo, descricao, data, created_at';
 
 // POST /lancamentos
-router.post('/', async (req: Request, res: Response) => {
-  const correlationId = (req.headers['x-correlation-id'] as string) ?? uuidv4();
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+  const correlationId = (req.headers['x-correlation-id'] as string | undefined) ?? uuidv4();
   const idempotencyKey = req.headers['x-idempotency-key'] as string | undefined;
 
-  const parsed = lancamentoSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: 'Validation error', details: parsed.error.flatten() });
+  if (idempotencyKey !== undefined && (idempotencyKey.length === 0 || idempotencyKey.length > 255)) {
+    sendProblem(res, 400, 'invalid-idempotency-key', 'Chave de idempotência inválida',
+      'X-Idempotency-Key deve ter entre 1 e 255 caracteres.');
     return;
   }
 
-  const { valor, tipo, descricao, data } = parsed.data;
-  const valorDecimal = new Decimal(valor).toFixed(2);
+  const parsed = lancamentoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    sendProblem(res, 400, 'validation-error', 'Dados inválidos', 'Um ou mais campos não passaram na validação.', {
+      errors: parsed.error.issues.map(i => ({ campo: i.path.join('.') || 'corpo', mensagem: i.message })),
+    });
+    return;
+  }
 
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-
-    // Idempotência dentro da transação: evita race condition sob requests concorrentes
-    if (idempotencyKey) {
-      const { rows: existing } = await client.query(
-        'SELECT id, valor, tipo, descricao, data, created_at FROM lancamentos WHERE idempotency_key = $1',
-        [idempotencyKey],
-      );
-      if (existing.length > 0) {
-        await client.query('ROLLBACK');
-        logger.info({ correlationId, idempotencyKey }, 'Duplicate request, returning existing');
-        res.status(200).json(existing[0]);
-        return;
-      }
+    const { criado, lancamento } = await registrarLancamento(pool, parsed.data, { correlationId, idempotencyKey });
+    if (!criado) {
+      logger.info({ correlationId, idempotencyKey }, 'Reenvio idempotente, devolvendo o lançamento original');
+      res.setHeader('Idempotent-Replayed', 'true');
+      res.status(200).json(lancamento);
+      return;
     }
-
-    const { rows } = await client.query<{
-      id: string;
-      valor: string;
-      tipo: string;
-      descricao: string;
-      data: string;
-      created_at: string;
-    }>(
-      `INSERT INTO lancamentos (valor, tipo, descricao, data, idempotency_key)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, valor, tipo, descricao, data, created_at`,
-      [valorDecimal, tipo, descricao ?? null, data, idempotencyKey ?? null],
-    );
-    const lancamento = rows[0];
-
-    const eventoId = uuidv4();
-    const payload = {
-      eventoId,
-      schemaVersion: '1.0',
-      tipo: 'LancamentoRegistrado',
-      correlationId,
-      createdAt: new Date().toISOString(),
-      data: {
-        lancamentoId: lancamento.id,
-        valor: lancamento.valor,
-        tipo: lancamento.tipo,
-        descricao: lancamento.descricao,
-        data: lancamento.data,
-      },
-    };
-
-    await client.query(
-      `INSERT INTO outbox (id, tipo_evento, payload) VALUES ($1, $2, $3)`,
-      [eventoId, 'LancamentoRegistrado', JSON.stringify(payload)],
-    );
-
-    await client.query('COMMIT');
-
-    lancamentosCreatedTotal.inc({ tipo });
-    logger.info({ correlationId, lancamentoId: lancamento.id, eventoId }, 'Lancamento registered');
+    lancamentosCreatedTotal.inc({ tipo: parsed.data.tipo });
+    logger.info({ correlationId, lancamentoId: lancamento.id }, 'Lancamento registered');
     res.status(201).json(lancamento);
-  } catch (err: unknown) {
-    await client.query('ROLLBACK');
-    // Constraint violation na idempotency_key: requests simultâneos com a mesma chave
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code: string }).code === '23505' &&
-      idempotencyKey
-    ) {
-      const { rows } = await client.query(
-        'SELECT id, valor, tipo, descricao, data, created_at FROM lancamentos WHERE idempotency_key = $1',
-        [idempotencyKey],
-      );
-      if (rows.length > 0) {
-        logger.info({ correlationId, idempotencyKey }, 'Concurrent duplicate resolved');
-        res.status(200).json(rows[0]);
-        return;
-      }
+  } catch (err) {
+    if (err instanceof ConflitoIdempotenciaError) {
+      sendProblem(res, 409, 'idempotency-key-conflict', 'Conflito de idempotência',
+        'Esta X-Idempotency-Key já foi usada com um corpo diferente. Use outra chave para um novo lançamento.');
+      return;
     }
-    logger.error({ err, correlationId }, 'Error creating lancamento');
-    res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    client.release();
+    next(err);
   }
 });
 
 // GET /lancamentos
-router.get('/', async (req: Request, res: Response) => {
-  const { data } = req.query;
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  const data = req.query.data;
+
+  if (data !== undefined && (typeof data !== 'string' || !isDataReal(data))) {
+    sendProblem(res, 400, 'validation-error', 'Dados inválidos', 'data deve ser uma data real no formato YYYY-MM-DD.');
+    return;
+  }
 
   try {
-    if (data) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(data))) {
-        res.status(400).json({ error: 'data deve estar no formato YYYY-MM-DD' });
-        return;
-      }
-      const { rows } = await pool.query(
-        'SELECT id, valor, tipo, descricao, data, created_at FROM lancamentos WHERE data = $1 ORDER BY created_at',
-        [data],
-      );
-      res.json(rows);
-    } else {
-      const { rows } = await pool.query(
-        'SELECT id, valor, tipo, descricao, data, created_at FROM lancamentos ORDER BY created_at DESC LIMIT 100',
-      );
-      res.json(rows);
-    }
+    const { rows } = data
+      ? await pool.query(`SELECT ${COLUNAS} FROM lancamentos WHERE data = $1 ORDER BY created_at`, [data])
+      : await pool.query(`SELECT ${COLUNAS} FROM lancamentos ORDER BY created_at DESC LIMIT 100`);
+    res.json(rows);
   } catch (err) {
-    logger.error({ err }, 'Error listing lancamentos');
-    res.status(500).json({ error: 'Internal server error' });
+    next(err);
   }
 });
 

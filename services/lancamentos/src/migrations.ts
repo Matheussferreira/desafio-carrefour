@@ -33,49 +33,11 @@ const migrations = [
     `,
   },
   {
-    name: '002_seed',
+    // Impressão digital do corpo, para responder 409 quando a chave de idempotência
+    // é reutilizada com outro conteúdo.
+    name: '002_request_hash',
     sql: `
-      -- Insere lançamentos e os respectivos eventos no outbox (mesma semântica do serviço)
-      DO $$
-      DECLARE
-        id1 UUID := gen_random_uuid();
-        id2 UUID := gen_random_uuid();
-        id3 UUID := gen_random_uuid();
-        ev1 UUID := gen_random_uuid();
-        ev2 UUID := gen_random_uuid();
-        ev3 UUID := gen_random_uuid();
-      BEGIN
-        INSERT INTO lancamentos (id, valor, tipo, descricao, data, idempotency_key)
-        VALUES
-          (id1, 1500.00, 'credito', 'Venda produto A', CURRENT_DATE - 1, 'seed-001'),
-          (id2,  200.50, 'debito',  'Compra insumos',  CURRENT_DATE - 1, 'seed-002'),
-          (id3, 3200.00, 'credito', 'Venda produto B', CURRENT_DATE,     'seed-003')
-        ON CONFLICT (idempotency_key) DO NOTHING;
-
-        INSERT INTO outbox (id, tipo_evento, payload)
-        SELECT ev1, 'LancamentoRegistrado', jsonb_build_object(
-          'eventoId', ev1, 'schemaVersion', '1.0', 'tipo', 'LancamentoRegistrado',
-          'correlationId', gen_random_uuid(), 'createdAt', now(),
-          'data', jsonb_build_object('lancamentoId', id1, 'valor', '1500.00',
-            'tipo', 'credito', 'descricao', 'Venda produto A', 'data', (CURRENT_DATE - 1)::text)
-        ) WHERE NOT EXISTS (SELECT 1 FROM outbox WHERE id = ev1);
-
-        INSERT INTO outbox (id, tipo_evento, payload)
-        SELECT ev2, 'LancamentoRegistrado', jsonb_build_object(
-          'eventoId', ev2, 'schemaVersion', '1.0', 'tipo', 'LancamentoRegistrado',
-          'correlationId', gen_random_uuid(), 'createdAt', now(),
-          'data', jsonb_build_object('lancamentoId', id2, 'valor', '200.50',
-            'tipo', 'debito', 'descricao', 'Compra insumos', 'data', (CURRENT_DATE - 1)::text)
-        ) WHERE NOT EXISTS (SELECT 1 FROM outbox WHERE id = ev2);
-
-        INSERT INTO outbox (id, tipo_evento, payload)
-        SELECT ev3, 'LancamentoRegistrado', jsonb_build_object(
-          'eventoId', ev3, 'schemaVersion', '1.0', 'tipo', 'LancamentoRegistrado',
-          'correlationId', gen_random_uuid(), 'createdAt', now(),
-          'data', jsonb_build_object('lancamentoId', id3, 'valor', '3200.00',
-            'tipo', 'credito', 'descricao', 'Venda produto B', 'data', CURRENT_DATE::text)
-        ) WHERE NOT EXISTS (SELECT 1 FROM outbox WHERE id = ev3);
-      END $$;
+      ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS request_hash TEXT;
     `,
   },
 ];

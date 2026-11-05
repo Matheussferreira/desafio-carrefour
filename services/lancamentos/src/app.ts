@@ -7,6 +7,7 @@ import authRouter from './routes/auth';
 import healthRouter from './routes/health';
 import lancamentosRouter from './routes/lancamentos';
 import { register } from './metrics';
+import { errorHandler, notFoundHandler } from './http/problem';
 
 const app = express();
 
@@ -24,5 +25,8 @@ app.get('/metrics', async (_req, res) => {
 // Rate limiting aplicado apenas às rotas de negócio e auth
 app.use('/auth', rateLimiter, authRouter);
 app.use('/lancamentos', rateLimiter, authMiddleware, lancamentosRouter);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 export default app;

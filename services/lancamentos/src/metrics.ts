@@ -1,4 +1,4 @@
-import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client';
+import { Registry, collectDefaultMetrics, Counter, Gauge, Histogram } from 'prom-client';
 
 export const register = new Registry();
 collectDefaultMetrics({ register });
@@ -27,6 +27,18 @@ export const lancamentosCreatedTotal = new Counter({
 
 export const outboxEventsPublishedTotal = new Counter({
   name: 'lancamentos_outbox_events_published_total',
-  help: 'Total eventos publicados pelo outbox relay',
+  help: 'Total de eventos publicados e confirmados pelo broker',
+  registers: [register],
+});
+
+export const outboxPublishFailuresTotal = new Counter({
+  name: 'lancamentos_outbox_publish_failures_total',
+  help: 'Lotes do outbox que falharam na publicação (sem confirmação, sem rota ou erro de conexão)',
+  registers: [register],
+});
+
+export const rabbitmqConnected = new Gauge({
+  name: 'lancamentos_rabbitmq_connected',
+  help: '1 quando a conexão do relay com o RabbitMQ está de pé, 0 caso contrário',
   registers: [register],
 });
