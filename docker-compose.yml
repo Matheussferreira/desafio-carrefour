@@ -236,6 +236,7 @@ services:
     profiles: ["observability"]
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml
     ports:
       - "9090:9090"
 

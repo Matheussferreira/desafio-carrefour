@@ -22,8 +22,7 @@ São correções e provas que o próprio projeto já identificou como lacuna. O 
 | Retenção do outbox e de `eventos_processados` | Ambas crescem sem limite (cerca de 0,8 KB por evento só no outbox, medido). Sem rotina, o disco de 50 GB dura cerca de um ano a 100 mil lançamentos por dia (extrapolação) | Ocupação do disco acima de 50% ou o outbox passar de um prazo acordado | M |
 | Advisory lock nas migrations | Duas réplicas subindo juntas podem colidir ao registrar a migration | Quando houver mais de uma réplica, junto com o item de rate limit | P |
 | Retentativa de erro permanente sem bloquear a fila | Falha de banco já não bloqueia nem vai para a DLQ ([ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)), mas um erro permanente ainda segura o consumidor por até 7 s (3 retentativas com `prefetch=1`) antes da DLQ | Observar `consolidado_consumer_retries_total` frequente, ou lag alto sem causa de carga | M |
-| Alertas (Prometheus Alertmanager ou CloudWatch) | Hoje há métricas e dashboard, sem alerta | Antes de produção; é pré-requisito para o RNF-05 ser acompanhado | P |
-| Teste para o desligamento gracioso (RNF-10) | Cobertura parcial hoje ([testes.md](testes.md)) | Antes de produção, junto com o ECS | P |
+| Roteamento dos alertas (Alertmanager ou CloudWatch) | As regras de `observability/alerts.yml` disparam no Prometheus e aparecem em `/alerts`, mas nada avisa uma pessoa | Antes de produção; é pré-requisito para o RNF-05 e o RNF-03 serem acompanhados | P |
 | Anonimização ou política para a `descricao` | O campo livre pode conter dado pessoal ([seguranca.md](seguranca.md)) | Parecer do compliance sobre LGPD | M |
 
 ## Prioridade 2: crescimento

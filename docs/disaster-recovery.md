@@ -61,7 +61,7 @@ Comandos de CLI são ilustrativos e **precisam ser validados no primeiro exercí
 
 ### Fase 1: detecção
 
-1. Alerta do CloudWatch (taxa de erro do ALB, `/ready` fora, `lancamentos_rabbitmq_connected` em 0) e página de status da AWS.
+1. Alerta do CloudWatch (taxa de erro do ALB, `/ready` fora, `lancamentos_rabbitmq_connected` do relay em 0) e página de status da AWS.
 2. Confirmar o escopo: falha de uma AZ é tratada automaticamente e **não aciona este roteiro**. Só falha regional vai adiante.
 3. Decidir o failover. A decisão é humana e registrada (quem, quando, por quê), porque ela aceita perder até 5 minutos de lançamentos (RPO).
 

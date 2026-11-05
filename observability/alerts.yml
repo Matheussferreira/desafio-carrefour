@@ -1,0 +1,77 @@
+# Regras de alerta do Prometheus. Elas são avaliadas aqui e aparecem em http://localhost:9090/alerts.
+# O envio para uma pessoa (Alertmanager, CloudWatch, e-mail) não está configurado: ver docs/evolucoes.md.
+groups:
+  - name: fluxo-de-caixa
+    rules:
+      - alert: AlvoForaDoAr
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} não responde às métricas há 1 minuto"
+
+      - alert: MensagemNaDLQ
+        expr: increase(consolidado_consumer_dlq_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "O consolidado mandou mensagem para a DLQ"
+          description: "É dado inválido ou erro permanente (falha de banco não chega à DLQ). Ver scripts/reprocessar-dlq depois de corrigir a causa."
+
+      - alert: ConsolidadoComBancoInstavel
+        expr: increase(consolidado_consumer_transient_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "O consumidor está retendo mensagens por falha transitória há mais de 5 minutos"
+          description: "Banco do consolidado fora ou instável. As mensagens não se perdem, mas o saldo não converge."
+
+      - alert: BrokerDesconectado
+        # A API de lançamentos não conecta ao broker (só o relay), então a série dela fica em 0 por desenho
+        expr: lancamentos_rabbitmq_connected{job="lancamentos-relay"} == 0 or consolidado_rabbitmq_connected == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "O relay ou o consolidado está sem conexão com o RabbitMQ há 1 minuto"
+
+      - alert: OutboxAtrasado
+        expr: lancamentos_outbox_idade_mais_antigo_segundos > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "O evento pendente mais antigo do outbox tem mais de 60 s"
+          description: "O relay não está publicando. Lançamentos continua aceitando, mas o saldo está atrasado."
+
+      - alert: LagDeConsistenciaAlto
+        expr: histogram_quantile(0.99, sum by (le) (rate(consolidado_evento_lag_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "O p99 do atraso entre o lançamento e o saldo passa de 30 s"
+          description: "O requisito de consistência (RNF-05) é de cerca de 5 s."
+
+      - alert: ConsolidadoComErrosDeServidor
+        expr: |
+          sum(rate(consolidado_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(consolidado_http_requests_total[5m])), 1e-9) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Mais de 5% das respostas do consolidado são 5xx"
+          description: "O RNF-03 admite no máximo 5% de perda."
+
+      - alert: LancamentosComErrosDeServidor
+        expr: |
+          sum(rate(lancamentos_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(lancamentos_http_requests_total[5m])), 1e-9) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Mais de 1% das respostas de lançamentos são 5xx"

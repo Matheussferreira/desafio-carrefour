@@ -155,4 +155,6 @@ docker compose --profile observability up -d --wait
 | Mensagens retidas por falha transitória | 0 em operação normal | `rate(consolidado_consumer_transient_errors_total[5m]) > 0` por mais de 5 min → banco do consolidado fora ou instável |
 | Lag de consistência (lançamento → saldo) | < 5s em p99 | > 30s → investigar relay ou broker |
 
+As regras estão em `observability/alerts.yml`, validadas com o `promtool` e carregadas pelo Prometheus do profile `observability` (aba Alerts em http://localhost:9090/alerts). Cobrem alvo fora do ar, mensagem na DLQ, retenção por falha transitória, broker desconectado (relay e consolidado), outbox atrasado, lag de consistência acima de 30 s e taxa de 5xx (acima de 5% no consolidado e de 1% em lançamentos). A prova foi parar o consolidado: `AlvoForaDoAr` passou a `firing` e voltou a vazio quando ele subiu. O envio para uma pessoa (Alertmanager, CloudWatch) não está configurado ([evolucoes.md](evolucoes.md)).
+
 Alertas baseados em `consolidado_consumer_dlq_total` e `consolidado_consumer_retries_total` são especialmente importantes: um spike de retries indica problema transiente (ex: banco sobrecarregado); mensagens na DLQ indicam problema persistente (ex: payload inválido ou bug no processamento) que requer intervenção manual.

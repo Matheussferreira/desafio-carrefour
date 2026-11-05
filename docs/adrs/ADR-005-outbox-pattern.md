@@ -62,6 +62,6 @@ Capturar as mudanças no WAL do Postgres e publicar automaticamente.
 - A tabela `outbox` serve como auditoria de todos os eventos publicados
 
 **Negativas:**
-- Latência adicional: o evento chega ao broker com delay de até `outbox_interval_ms` (padrão 1s)
+- Latência adicional: o evento chega ao broker com delay de até `OUTBOX_INTERVAL_MS` (padrão 1s)
 - O relay precisa rodar continuamente; roda como processo próprio (ver ADR-008)
 - Possibilidade de duplicatas: se o relay publicar e cair antes de marcar como publicado, o evento será publicado de novo na próxima execução, e por isso o consumidor deve ser idempotente (e é, via `eventos_processados`)

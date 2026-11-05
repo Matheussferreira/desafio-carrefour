@@ -22,7 +22,7 @@ flowchart TB
 | Camada | Onde | Infraestrutura | Tempo típico | Como rodar |
 |---|---|---|---|---|
 | Unitário | `services/*/tests/unit` | Nenhuma (um IdP de teste local publica o JWKS) | cerca de 20 s por serviço | `docker compose --profile test run --rm lancamentos-test` (e `consolidado-test`) ou `npm run test:unit` dentro do serviço |
-| Integração | `services/*/tests/integration` | `docker-compose.integration.yml` (Postgres 5433, RabbitMQ 5673, Redis 6380) | cerca de 1 min no total | `.\test-integration.ps1` ou `bash test-integration.sh` |
+| Integração | `services/*/tests/integration` | `docker-compose.integration.yml` (Postgres 5433, RabbitMQ 5673, Redis 6380) | cerca de 3 min no total | `.\test-integration.ps1` ou `bash test-integration.sh` |
 | Resiliência | `tests/resiliencia` | A stack principal no ar | cerca de 8 min (cinco cenários) | `.\tests\resiliencia\resiliencia.ps1` ou `bash tests/resiliencia/resiliencia.sh` |
 | Carga | `tests/load` | A stack principal no ar, com Keycloak | cerca de 3 min por cenário | `docker compose --profile loadtest run --rm k6` |
 | Custo do JWT | `services/consolidado/tests/benchmark` | Nenhuma | cerca de 1 min | `npm run bench:auth` dentro do serviço |
@@ -47,7 +47,7 @@ A tabela de cenários de falha em [arquitetura.md](arquitetura.md) liga cada fal
 | RNF-07 Idempotência | Reentrega não duplica saldo | Integração: o mesmo evento aplicado duas vezes soma uma; chave de idempotência por comerciante e 409 com corpo diferente | Integração |
 | RNF-08 Segurança | Token válido, escopo e comerciante | Unitário: assinatura, `alg`, issuer, audiência, expiração, escopo, comerciante, 503 quando o JWKS cai; 413 para corpo grande; cabeçalhos do helmet | Unitário |
 | RNF-09 At-least-once | Resiliente a redelivery | Ver RNF-07; integração de reconexão do broker, de espera por falha transitória e da DLQ | Integração |
-| RNF-10 Graceful shutdown | Sem perda de mensagem em processamento | Cobertura parcial: o comportamento de nack durante o desligamento está no código do consumidor, sem teste automatizado dedicado | Lacuna conhecida |
+| RNF-10 Graceful shutdown | Sem perda de mensagem em processamento | `desligamento.test.ts` (banco fora: a mensagem retida volta para a fila, não vai para a DLQ e o desligamento não espera o prazo de 8 s) e `desligamento-em-carga.test.ts` (desliga no meio de um lote de 40 eventos: cada um foi aplicado ou voltou para a fila, nenhum na DLQ, saldo igual ao aplicado) | Integração |
 | Contrato HTTP | Os documentos descrevem a API que existe | OpenAPI 3 de cada serviço (`services/*/openapi.yaml`): documento válido, mesmas rotas que o Express registra, escopos iguais aos do código, respostas reais (201, 200, 400, 401, 403, 409, paginação) conferem com os schemas | Unitário, integração |
 | Paginação | Listagem estável, sem repetir nem pular | Cursor com ordem (`created_at`, `id`), mesmo instante de criação, filtro por data, isolamento entre comerciantes, parâmetros inválidos em 400, uso do índice | Unitário, integração (`paginacao.test.ts`) |
 
