@@ -39,7 +39,7 @@ Dá identidade forte ao cliente, mas não expressa escopos nem o vínculo com o 
 Útil na borda, mas deixaria os serviços confiando cegamente em qualquer chamada que chegue à rede interna. A validação nos serviços é a defesa em profundidade; o gateway pode repetir a checagem.
 
 ### Amazon Cognito
-É a opção natural na AWS e fala o mesmo OIDC, então a troca não exige mudança de código, só de configuração (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`). Para o ambiente local reproduzível, Keycloak roda em um container e dispensa conta de nuvem. **Cognito segue como equivalente de produção.**
+É a opção natural na AWS e fala OIDC, mas a troca **não é só configuração** (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`). Segundo a documentação da AWS, o token de credencial de cliente do Cognito traz `client_id` e `scope` em vez de `aud`, o nome dos escopos inclui o identificador do servidor de recursos, e o claim `comerciante_id` exigiria um gatilho de geração de token. A validação em `auth.ts` precisaria aceitar esses formatos. Confirmar na documentação do Cognito antes de decidir; a estimativa de custo está em [custos.md](../custos.md).
 
 ### Introspecção de token a cada requisição
 Permitiria revogação imediata, ao custo de uma chamada ao provedor por requisição e de acoplar a disponibilidade das APIs ao Keycloak. Com a validação local por JWKS, o Keycloak pode cair sem derrubar quem já tem token. **Descartado.**

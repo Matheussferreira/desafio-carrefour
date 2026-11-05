@@ -1,5 +1,5 @@
 /**
- * Teste de carga k6 — Fase 4
+ * Teste de carga k6 (Fase 4)
  *
  * PROVA o requisito NF-02:
  *   "Em dias de pico, o serviço de consolidado recebe 50 req/s,
@@ -7,10 +7,10 @@
  *
  * Dois cenários rodados em SEQUÊNCIA (não simultâneos):
  *
- *   cache_hit  (T=0–60s)  — mesma data repetida → Redis hit após 1ª req.
+ *   cache_hit  (T=0 a 60s): mesma data repetida → Redis hit após 1ª req.
  *                            Prova: throughput máximo, caminho quente.
  *
- *   cache_miss (T=70–130s) — 60 datas distintas rotacionando.
+ *   cache_miss (T=70 a 130s): 60 datas distintas rotacionando.
  *                            Setup não aquece o cache dessas datas; à época
  *                            que o cenário inicia (T=70s), o TTL de 60s já
  *                            expirou para todas as datas verificadas em setup.
@@ -18,7 +18,7 @@
  *                            Passagens seguintes: Redis.
  *                            Prova: Postgres sob 50 req/s, sem perdas.
  *
- *   pico_acima_do_limite (T=140–180s) — 200 req/s por 40 s, acima dos 100 req/s da cota
+ *   pico_acima_do_limite (T=140 a 180s): 200 req/s por 40 s, acima dos 100 req/s da cota
  *                            do limitador (6.000 req/min por IP). Prova que só aparecem
  *                            200 e 429, todo 429 com Retry-After, sem 5xx. Se haverá 429
  *                            depende do alinhamento da janela fixa de 1 min, então a
@@ -27,7 +27,7 @@
  *
  * Definição de "perda": qualquer resposta ≠ HTTP 200.
  * Threshold: não_ok_rate < 5% (exit != 0 se violado).
- * Rate limiter ligado: 6.000 req/min (100 req/s) — teste usa 50% da cota.
+ * Rate limiter ligado: 6.000 req/min (100 req/s). O teste usa 50% da cota.
  */
 
 import http from 'k6/http';
@@ -50,7 +50,7 @@ const CLIENT_ID       = __ENV.CLIENT_ID       || 'erp-loja-1';
 const CLIENT_SECRET   = __ENV.CLIENT_SECRET   || 'dev-segredo-erp-loja-1';
 
 // 60 datas distintas para o cenário cache_miss.
-// Intervalo escolhido no passado recente (fev–abr 2026): sem conflito com TEST_DATE.
+// Intervalo escolhido no passado recente (fev a abr 2026): sem conflito com TEST_DATE.
 const CACHE_MISS_DATES = Array.from({ length: 60 }, (_, i) => {
   const d = new Date('2026-02-01');
   d.setDate(d.getDate() + i);
@@ -112,7 +112,7 @@ export const options = {
  *   3. Seed 1 lançamento por data em CACHE_MISS_DATES (cenário cache_miss)
  *   4. Aguarda 7s de consistência eventual
  *   5. Verifica TEST_DATE retorna 200 (pré-condição cache_hit)
- *   6. Verifica amostra das datas cache_miss — apenas 2, sem aquecer as outras 58
+ *   6. Verifica amostra das datas cache_miss (apenas 2), sem aquecer as outras 58
  *      (o TTL de 60s expira antes de T=70s quando cache_miss inicia)
  */
 export function setup() {
@@ -145,7 +145,7 @@ export function setup() {
       { headers: authHeaders },
     );
     if (res.status !== 201 && res.status !== 200) {
-      throw new Error(`[setup] Seed cache_hit #${i} falhou: HTTP ${res.status} — ${res.body}`);
+      throw new Error(`[setup] Seed cache_hit #${i} falhou: HTTP ${res.status} ${res.body}`);
     }
   }
 
@@ -164,7 +164,7 @@ export function setup() {
     );
     if (res.status !== 201 && res.status !== 200) {
       throw new Error(
-        `[setup] Seed cache_miss #${i} (${CACHE_MISS_DATES[i]}) falhou: HTTP ${res.status} — ${res.body}`,
+        `[setup] Seed cache_miss #${i} (${CACHE_MISS_DATES[i]}) falhou: HTTP ${res.status} ${res.body}`,
       );
     }
   }
@@ -205,7 +205,7 @@ export function setup() {
   return { token };
 }
 
-/** Cenário 1: cache quente — DATA FIXA → Redis hit após 1ª requisição */
+/** Cenário 1: cache quente com DATA FIXA → Redis hit após 1ª requisição */
 export function cacheHitScenario(data) {
   const res = http.get(
     `${CONSOLIDADO_URL}/consolidado/${TEST_DATE}`,
@@ -219,7 +219,7 @@ export function cacheHitScenario(data) {
   });
 }
 
-/** Cenário 2: cache miss — DATA VARIÁVEL → rotação entre 60 datas distintas */
+/** Cenário 2: cache miss com DATA VARIÁVEL → rotação entre 60 datas distintas */
 export function cacheMissScenario(data) {
   const date = CACHE_MISS_DATES[exec.scenario.iterationInTest % CACHE_MISS_DATES.length];
   const res = http.get(

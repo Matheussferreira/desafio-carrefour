@@ -1,4 +1,4 @@
-# ADR-003 — RabbitMQ vs. Kafka vs. SQS
+# ADR-003: RabbitMQ vs. Kafka vs. SQS
 
 **Status:** Aceito  
 **Data:** 2026-06-24
@@ -25,7 +25,7 @@ Parâmetros do sistema:
 
 ## Alternativas Descartadas
 
-### Kafka (descartado — volume não justifica)
+### Kafka (descartado: volume não justifica)
 
 Kafka é projetado para volumes de 100k a 1M+ msg/s com múltiplos consumer groups independentes e necessidade de replay histórico. A 50 req/s, Kafka estaria operando a menos de 0,05% da sua capacidade mínima.
 
@@ -47,7 +47,7 @@ Kafka é projetado para volumes de 100k a 1M+ msg/s com múltiplos consumer grou
 
 Nenhum desses triggers existe neste sistema. Usar Kafka aqui seria otimizar para um problema que não existe.
 
-### Amazon SQS + SNS (descartado — vendor lock-in e sem local)
+### Amazon SQS + SNS (descartado: vendor lock-in e sem local)
 
 **Por que foi descartado:**
 - Sem suporte local sem LocalStack, que adiciona complexidade ao `docker compose up` e divergência entre ambientes
@@ -55,9 +55,9 @@ Nenhum desses triggers existe neste sistema. Usar Kafka aqui seria otimizar para
 - Vendor lock-in: o sistema ficaria acoplado à AWS sem nenhum ganho funcional a esse volume
 - Sem management UI local para debugging
 
-**Quando SQS/SNS seria a escolha correta:** Em um sistema já hospedado na AWS onde a equipe quer eliminar a operação do broker. Nesse caso, SQS para filas simples e SNS+SQS para fan-out são escolhas sólidas — o managed service elimina o custo operacional do Kafka/RabbitMQ. A escolha entre broker self-hosted e SQS é principalmente operacional, não técnica.
+**Quando SQS/SNS seria a escolha correta:** Em um sistema já hospedado na AWS onde a equipe quer eliminar a operação do broker. Nesse caso, SQS para filas simples e SNS+SQS para fan-out são escolhas sólidas: o managed service elimina o custo operacional do Kafka/RabbitMQ. A escolha entre broker self-hosted e SQS é principalmente operacional, não técnica.
 
-### Redis Streams (descartado — Redis já é cache aqui)
+### Redis Streams (descartado: Redis já é cache aqui)
 
 Redis Streams pode fazer o papel de broker simples. Descartado porque: não há uma imagem unificada de "Redis como broker + Redis como cache" que seja operacionalmente mais simples que RabbitMQ separado. A semântica de consumer groups do Redis Streams é menos madura para casos de DLQ/redelivery.
 
@@ -81,5 +81,5 @@ Redis Streams pode fazer o papel de broker simples. Descartado porque: não há 
 
 **Negativas:**
 - Sem replay nativo: mensagens consumidas são descartadas (mitigado pelo Outbox que preserva no banco)
-- Single-node neste setup: sem clustering, sem quorum queues — mensagens não replicadas são perdidas se o broker morrer antes de serem consumidas (ver decisões de produção no README)
-- Se o volume crescer para dezenas de milhares de req/s, migrar para Kafka ou Amazon MQ for Kafka seria necessário
+- Single-node neste setup: sem clustering, sem quorum queues; mensagens não replicadas são perdidas se o broker morrer antes de serem consumidas (ver decisões de produção no README)
+- Se o volume crescer para dezenas de milhares de req/s, migrar para Kafka (na AWS, o Amazon MSK) seria necessário

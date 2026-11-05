@@ -2,7 +2,7 @@
 
 ## O que está implementado
 
-### Métricas Prometheus — sempre ligadas
+### Métricas Prometheus: sempre ligadas
 
 Ambos os serviços expõem `/metrics` sem autenticação, prontos para scraping pelo Prometheus.
 
@@ -20,7 +20,7 @@ As métricas HTTP (`*_http_requests_total` e `*_http_request_duration_seconds`) 
 | `lancamentos_outbox_pendentes` | Gauge | n/a | Eventos no outbox ainda não publicados (calculado a cada scrape, só no processo do relay) |
 | `lancamentos_outbox_idade_mais_antigo_segundos` | Gauge | n/a | Idade do evento pendente mais antigo; 0 quando não há pendentes |
 | `lancamentos_rabbitmq_connected` | Gauge | n/a | 1 quando o relay está conectado ao RabbitMQ |
-| Métricas Node.js default | — | — | Heap, GC, CPU, event loop lag |
+| Métricas Node.js default | n/a | n/a | Heap, GC, CPU, event loop lag |
 
 **Consolidado (`:3002/metrics`):**
 
@@ -29,13 +29,13 @@ As métricas HTTP (`*_http_requests_total` e `*_http_request_duration_seconds`) 
 | `consolidado_http_requests_total` | Counter | `method, route, status` | Volume de requisições HTTP |
 | `consolidado_http_request_duration_seconds` | Histogram | `method, route, status` | Latência das requisições; buckets: 5ms a 2.5s |
 | `consolidado_events_processed_total` | Counter | `tipo, status` | Eventos processados; `status`: `processed`, `skipped`, `dlq`, `invalid` |
-| `consolidado_consumer_retries_total` | Counter | — | Cada vez que `withRetry` chama o callback `onRetry`; uma mensagem que esgota os retries contribui **3** para este contador (não 4 — a última tentativa falha sem callback) |
-| `consolidado_consumer_dlq_total` | Counter | — | Mensagens enviadas à DLQ após esgotar retries; deve ser próximo de zero em operação normal |
+| `consolidado_consumer_retries_total` | Counter | n/a | Cada vez que `withRetry` chama o callback `onRetry`; uma mensagem que esgota os retries contribui **3** para este contador (não 4, a última tentativa falha sem callback) |
+| `consolidado_consumer_dlq_total` | Counter | n/a | Mensagens enviadas à DLQ após esgotar retries; deve ser próximo de zero em operação normal |
 | `consolidado_evento_lag_seconds` | Histogram | n/a | Lag: tempo entre a criação do evento (`createdAt`) e a aplicação ao saldo. Buckets de 50 ms a 300 s |
 | `consolidado_rabbitmq_connected` | Gauge | n/a | 1 quando o consumidor está conectado ao RabbitMQ |
-| Métricas Node.js default | — | — | Heap, GC, CPU, event loop lag |
+| Métricas Node.js default | n/a | n/a | Heap, GC, CPU, event loop lag |
 
-> **Interpretação de `consumer_retries_total`:** O valor N neste counter não significa N execuções de `processEvent` que falharam — significa N callbacks de retry chamados. Uma mensagem que falha 4 vezes (1 inicial + 3 retries) contribui com 3 para `consumer_retries_total` e 1 para `consumer_dlq_total`. Para saber o total de tentativas, some `consumer_retries_total + consumer_dlq_total` (onde cada entry na DLQ representa 1 tentativa não contada no retries counter).
+> **Interpretação de `consumer_retries_total`:** O valor N neste counter não significa N execuções de `processEvent` que falharam, significa N callbacks de retry chamados. Uma mensagem que falha 4 vezes (1 inicial + 3 retries) contribui com 3 para `consumer_retries_total` e 1 para `consumer_dlq_total`. Para saber o total de tentativas, some `consumer_retries_total + consumer_dlq_total` (onde cada entry na DLQ representa 1 tentativa não contada no retries counter).
 
 ### Logs Estruturados (pino)
 
@@ -62,8 +62,8 @@ docker compose logs consolidado | grep "7f3e9c1a"
 | Endpoint | Tipo | Verifica |
 |---|---|---|
 | `GET /health` | Liveness | Processo vivo; retorna `{"status":"ok"}` incondicionalmente |
-| `GET /ready` — lancamentos | Readiness | `SELECT 1` no banco + canal RabbitMQ inicializado |
-| `GET /ready` — consolidado | Readiness | `SELECT 1` no banco + `PING` no Redis + canal RabbitMQ |
+| `GET /ready`, lancamentos | Readiness | `SELECT 1` no banco. A API não depende do broker, que é assunto do `lancamentos-relay` |
+| `GET /ready`, consolidado | Readiness | `SELECT 1` no banco + `PING` no Redis + canal RabbitMQ |
 
 O Docker Compose usa `/ready` como healthcheck de `lancamentos`, `lancamentos-relay` e `consolidado`, e `docker compose up --wait` só retorna quando os três estão saudáveis. O `/ready` do consolidado e do relay fica 503 quando a conexão com o RabbitMQ cai; o da API de lançamentos depende apenas do banco.
 
@@ -71,8 +71,8 @@ O Docker Compose usa `/ready` como healthcheck de `lancamentos`, `lancamentos-re
 
 Ao receber SIGTERM, o consumer do Consolidado:
 
-1. Cancela o consumer tag via `channel.cancel(consumerTag)` — o broker para de enviar novas mensagens
-2. Seta `shuttingDown = true` — mensagens recebidas durante o shutdown são requeued (não perdidas)
+1. Cancela o consumer tag via `channel.cancel(consumerTag)`, o broker para de enviar novas mensagens
+2. Seta `shuttingDown = true`, mensagens recebidas durante o shutdown são requeued (não perdidas)
 3. Aguarda até 8s para a mensagem em processamento (`inFlight > 0`) terminar
 4. Fecha o canal e a conexão AMQP
 
@@ -86,11 +86,11 @@ docker compose --profile observability up -d
 # Grafana:    http://localhost:3000  (admin/admin)
 ```
 
-O dashboard **"Fluxo de Caixa — Overview"** é provisionado automaticamente via
+O dashboard **"Fluxo de Caixa: Overview"** é provisionado automaticamente via
 `observability/grafana/provisioning/dashboards/caixa-flow.json`. Painéis:
 
-- Taxa de requisições e latência p50/p95 — Lançamentos
-- Taxa de eventos processados por status (`processed`/`skipped`/`dlq`/`invalid`) — Consolidado
+- Taxa de requisições e latência p50/p95 do Lançamentos
+- Taxa de eventos processados por status (`processed`/`skipped`/`dlq`/`invalid`) do Consolidado
 - Contadores de retries e DLQ do consumer (com thresholds coloridos)
 - Heap Node.js de ambos os serviços
 - Lag do consolidado (p50, p95 e p99), eventos pendentes no outbox e idade do mais antigo
@@ -135,7 +135,7 @@ Para ver na interface:
 
 ```powershell
 docker compose --profile observability up -d --wait
-.scriptsseed-demo.ps1
+.\scripts\seed-demo.ps1
 # Abra http://localhost:16686, escolha o serviço "lancamentos" e clique em Find Traces
 ```
 
@@ -149,8 +149,8 @@ docker compose --profile observability up -d --wait
 | Latência `POST /lancamentos` p99 | < 200ms | > 500ms por 5min |
 | Taxa de erro `POST /lancamentos` | < 0.1% | > 1% por 5min |
 | Disponibilidade `GET /consolidado` | > 99.5% em 30 dias | < 99% em janela de 1h |
-| Latência `GET /consolidado` p95 | < 100ms (cache hit) / < 500ms (miss) | > 200ms por 5min |
+| Latência `GET /consolidado` p95 | < 100ms (cache quente) / < 200ms (cache frio) | > 200ms por 5min |
 | Taxa de mensagens na DLQ | < 0.01% do total | Qualquer mensagem na DLQ → alerta imediato |
 | Lag de consistência (lançamento → saldo) | < 5s em p99 | > 30s → investigar relay ou broker |
 
-Alertas baseados em `consumer_dlq_total` e `consumer_retries_total` são especialmente importantes: um spike de retries indica problema transiente (ex: banco sobrecarregado); mensagens na DLQ indicam problema persistente (ex: payload inválido ou bug no processamento) que requer intervenção manual.
+Alertas baseados em `consolidado_consumer_dlq_total` e `consolidado_consumer_retries_total` são especialmente importantes: um spike de retries indica problema transiente (ex: banco sobrecarregado); mensagens na DLQ indicam problema persistente (ex: payload inválido ou bug no processamento) que requer intervenção manual.

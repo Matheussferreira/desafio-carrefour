@@ -30,7 +30,7 @@
         "y": 0
       },
       "id": 10,
-      "title": "Lançamentos — Serviço de Registro",
+      "title": "Lançamentos: Serviço de Registro",
       "type": "row"
     },
     {
@@ -75,7 +75,7 @@
           "legendFormat": "HTTP {{status}}"
         }
       ],
-      "title": "Taxa de Requisições — Lançamentos (req/s)",
+      "title": "Taxa de Requisições: Lançamentos (req/s)",
       "type": "timeseries"
     },
     {
@@ -128,7 +128,7 @@
           "legendFormat": "p50"
         }
       ],
-      "title": "Latência HTTP — Lançamentos (p50 / p95)",
+      "title": "Latência HTTP: Lançamentos (p50 / p95)",
       "type": "timeseries"
     },
     {
@@ -226,7 +226,7 @@
         "y": 13
       },
       "id": 11,
-      "title": "Consolidado — Serviço de Saldo",
+      "title": "Consolidado: Serviço de Saldo",
       "type": "row"
     },
     {
@@ -324,7 +324,7 @@
           "legendFormat": "p50"
         }
       ],
-      "title": "Latência HTTP — Consolidado (p50 / p95)",
+      "title": "Latência HTTP: Consolidado (p50 / p95)",
       "type": "timeseries"
     },
     {
@@ -773,7 +773,7 @@
   },
   "timepicker": {},
   "timezone": "America/Sao_Paulo",
-  "title": "Fluxo de Caixa — Overview",
+  "title": "Fluxo de Caixa: Overview",
   "uid": "caixa-flow-v1",
   "version": 1
 }

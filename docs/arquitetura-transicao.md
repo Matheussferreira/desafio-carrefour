@@ -1,10 +1,10 @@
-# Arquitetura de Transição — Strangler Fig Pattern
+# Arquitetura de Transição: Strangler Fig Pattern
 
 ## Contexto
 
 O sistema atual pode coexistir com um monolito legado (ex: ERP em Java/PHP que já controla fluxo de caixa). Esta documentação descreve como migrar incrementalmente, sem downtime e sem perda de dados, do legado para a arquitetura de microsserviços.
 
-O Strangler Fig cria o novo sistema em paralelo e transfere o tráfego gradualmente — até que o legado possa ser desligado com segurança.
+O Strangler Fig cria o novo sistema em paralelo e transfere o tráfego gradualmente, até que o legado possa ser desligado com segurança.
 
 ---
 
@@ -12,26 +12,26 @@ O Strangler Fig cria o novo sistema em paralelo e transfere o tráfego gradualme
 
 ```mermaid
 graph TD
-    subgraph "Fase 1 — Proxy na frente do legado"
+    subgraph "Fase 1: Proxy na frente do legado"
         CLI1[Clientes] -->|100% tráfego| PROXY1[API Gateway / Nginx]
         PROXY1 -->|tudo| LEG1[Monolito Legado]
     end
 
-    subgraph "Fase 2 — Novo Lançamentos em paralelo"
+    subgraph "Fase 2: Novo Lançamentos em paralelo"
         CLI2[Clientes] --> PROXY2[API Gateway]
         PROXY2 -->|POST /lancamentos 50%| NOVO_L[Novo Serviço\nLancamentos]
         PROXY2 -->|POST /lancamentos 50%| LEG2[Monolito Legado]
         NOVO_L -->|eventos| MQ[RabbitMQ]
     end
 
-    subgraph "Fase 3 — Consolidado novo, legado em read-only"
+    subgraph "Fase 3: Consolidado novo, legado em read-only"
         LEG3[Monolito Legado] -->|CDC / batch sync| MQ2[RabbitMQ]
         MQ2 --> NOVO_C[Novo Serviço\nConsolidado]
         PROXY3[API Gateway] -->|GET /consolidado 100%| NOVO_C
         PROXY3 -->|POST /lancamentos 100%| NOVO_L2[Novo Serviço\nLancamentos]
     end
 
-    subgraph "Fase 4 — Legado desligado"
+    subgraph "Fase 4: Legado desligado"
         PROXY4[API Gateway] -->|100%| SVC_L[Lancamentos]
         SVC_L -->|eventos| MQ3[RabbitMQ]
         MQ3 --> SVC_C[Consolidado]
@@ -42,17 +42,17 @@ graph TD
 
 ## Plano Detalhado
 
-### Fase 1 — Proxy (Semana 1-2)
+### Fase 1: Proxy (Semana 1-2)
 
 **Objetivo:** Ponto de controle de roteamento sem alterar comportamento.
 
 1. Instalar API Gateway (AWS ALB, Kong ou Nginx) na frente do monolito
-2. Todos os requests continuam indo para o legado — zero mudança funcional
+2. Todos os requests continuam indo para o legado: zero mudança funcional
 3. Validar que latência e taxa de erro se mantêm iguais ao baseline pré-proxy
 
 **Critério de saída:** Proxy em produção com < 5ms de latência adicional, monitorado por 48h sem incidentes.
 
-### Fase 2 — Novo Lançamentos em shadow/canary (Semana 3-4)
+### Fase 2: Novo Lançamentos em shadow/canary (Semana 3-4)
 
 **Objetivo:** Validar que o novo serviço produz os mesmos resultados que o legado.
 
@@ -61,11 +61,11 @@ graph TD
 3. Quando shadow validado: canary a 10% → 50% → 100%, controlado por feature flag no API Gateway
 4. O novo serviço publica `LancamentoRegistrado` no RabbitMQ desde o primeiro request
 
-**Ponto crítico:** Durante a fase canary (Lançamentos dividido entre legado e novo), o Consolidado não existe ainda. Os eventos publicados pelo novo serviço ficam acumulados na fila — isso é esperado. A fila deve ser monitorada para não crescer além da capacidade do broker.
+**Ponto crítico:** Durante a fase canary (Lançamentos dividido entre legado e novo), o Consolidado não existe ainda. Os eventos publicados pelo novo serviço ficam acumulados na fila, e isso é esperado. A fila deve ser monitorada para não crescer além da capacidade do broker.
 
 **Critério de saída:** 100% dos POSTs no novo serviço, zero erro introduzido, legacy apenas recebendo GETs.
 
-### Fase 3 — Consolidado novo e sync histórico (Semana 5-6)
+### Fase 3: Consolidado novo e sync histórico (Semana 5-6)
 
 **Objetivo:** Migrar a visão de saldo para o novo serviço sem divergência de dados.
 
@@ -78,7 +78,7 @@ graph TD
 
 **Critério de saída:** Saldos do novo Consolidado batem com o legado para todos os dias históricos. Taxa de divergência = 0%.
 
-### Fase 4 — Descomissionamento (Semana 7-8)
+### Fase 4: Descomissionamento (Semana 7-8)
 
 1. 100% do tráfego nos novos serviços (já desde o final da Fase 3)
 2. Legado em modo **read-only** por 2 semanas: aceita GETs para rollback de emergência, rejeita POSTs
@@ -102,7 +102,7 @@ graph TD
 | Risco | Probabilidade | Mitigação |
 |---|---|---|
 | Dados históricos não sincronizados | Média | Sync com validação linha a linha; comparar hash dos saldos por data antes de migrar GETs |
-| Duplicidade de eventos durante a fase 2 (canary + legado publicando) | Alta se legado também publicar | Legado NÃO deve publicar eventos — apenas o novo serviço. Se o legado já publicar no broker por outro motivo, o consumer precisa filtrar por `correlationId` ou fonte |
+| Duplicidade de eventos durante a fase 2 (canary + legado publicando) | Alta se legado também publicar | Legado NÃO deve publicar eventos, apenas o novo serviço. Se o legado já publicar no broker por outro motivo, o consumer precisa filtrar por `correlationId` ou fonte |
 | Performance degradada durante o sync histórico | Média | Executar sync em horário de baixo tráfego com rate limiting (ex: 100 eventos/s) |
 | Rollback após Fase 4 | Baixa | Manter backup do banco do legado por 30 dias após descomissionamento |
-| Idempotência do sync vs. idempotência de produção | Baixa | Usar o mesmo `evento_id` derivado do ID do lançamento legado — garante que replay e sync usam o mesmo espaço de IDs |
+| Idempotência do sync vs. idempotência de produção | Baixa | Usar o mesmo `evento_id` derivado do ID do lançamento legado, o que garante que replay e sync usam o mesmo espaço de IDs |

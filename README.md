@@ -281,7 +281,7 @@ O que é coberto:
 
 ```powershell
 docker compose up -d --build --wait
-.	estsesilienciaesiliencia.ps1
+.\tests\resiliencia\resiliencia.ps1
 ```
 
 No Linux, macOS ou Git Bash: `bash tests/resiliencia/resiliencia.sh`.
@@ -365,15 +365,15 @@ O lançamento fica pendente no outbox enquanto o broker está fora e é publicad
 docker compose --profile observability up -d --wait
 # Métricas, dashboards e traces (liga o tracing nos três processos)
 docker compose -f docker-compose.yml -f docker-compose.tracing.yml --profile observability up -d --wait
-# Grafana:    http://localhost:3000  (admin/admin), dashboard "Fluxo de Caixa - Overview"
+# Grafana:    http://localhost:3000  (admin/admin), dashboard "Fluxo de Caixa: Overview"
 # Prometheus: http://localhost:9090
 # Jaeger:     http://localhost:16686 (traces)
 # RabbitMQ:   http://localhost:15672 (rabbit/rabbit)
 ```
 
-Para ver um trace, registre um lançamento (`.scriptsseed-demo.ps1`) e procure o serviço `lancamentos` no Jaeger:
+Para ver um trace, registre um lançamento (`.\scripts\seed-demo.ps1`) e procure o serviço `lancamentos` no Jaeger:
 o mesmo trace atravessa a API, o relay e o consolidado. Os logs trazem `traceId`.
-Para conferir no Prometheus que cada painel do dashboard tem dado: `.scriptserificar-dashboard.ps1`.
+Para conferir no Prometheus que cada painel do dashboard tem dado: `.\scripts\verificar-dashboard.ps1`.
 
 O tracing vem desligado por padrão porque acrescenta CPU por requisição (`docs/observabilidade.md` e `docs/evidencias/regressao-latencia.txt`). Só o segundo comando acima o liga.
 
@@ -381,18 +381,23 @@ O tracing vem desligado por padrão porque acrescenta CPU por requisição (`doc
 
 ## Documentação
 
-- `docs/arquitetura.md` — C4 Context/Container/Component com diagramas Mermaid
+- `docs/arquitetura.md`: C4 (contexto, containers e componentes) em Mermaid e tabela de cenários de falha
 - `docs/adrs/`: 10 ADRs cobrindo as decisões de projeto
 - `docs/eventos.md`: contrato do evento e política de versionamento
-- `docs/requisitos.md` — requisitos funcionais e não-funcionais
+- `docs/requisitos.md`: requisitos funcionais e não funcionais
 - `docs/testes.md`: pirâmide de testes ligada aos requisitos não funcionais
 - `docs/observabilidade.md`: métricas, logs, tracing e SLOs
 - `docs/evidencias/`: saídas reais de resiliência, k6, trace, dashboard e custos medidos
 - `docs/seguranca.md`: modelo de consumo (OAuth2 e escopos), resiliência da autenticação, limitações e produção
 - `keycloak/realm-caixa.json`: realm de desenvolvimento com os clientes de integração
-- `docs/arquitetura-alvo-cloud.md` — deploy na AWS (ECS, RDS, MQ, ElastiCache)
-- `docs/custos.md` — estimativa de custo mensal
-- `tests/load/README.md` — detalhes do teste de carga k6
+- `docs/arquitetura-alvo-cloud.md`: arquitetura alvo na AWS (ECS, RDS, Amazon MQ, ElastiCache)
+- `docs/custos.md`: estimativa de custos em sa-east-1, dois cenários, com memória de cálculo e licenças
+- `docs/dimensionamento.md`: capacidade medida, hipóteses e como validar na AWS
+- `docs/disaster-recovery.md`: RTO e RPO, backup e roteiro de operação
+- `docs/evolucoes.md`: evoluções priorizadas, cada uma com seu gatilho
+- `docs/arquitetura-transicao.md`: migração do legado (Strangler Fig)
+- `docs/dominios-e-capacidades.md`: domínios, capacidades de negócio e contexto delimitado
+- `tests/load/README.md`: detalhes dos testes de carga k6
 
 ---
 
@@ -403,7 +408,7 @@ Simplificações conscientes, não esquecimentos.
 | Aspecto | Neste desafio | Em produção |
 |---|---|---|
 | Instâncias de banco | `lancamentos_db` e `consolidado_db` no mesmo Postgres | Instâncias separadas (RDS separados), um banco sobrecarregado não degrada o outro |
-| RabbitMQ | Single-node | Cluster de 3 nós com quorum queues, sem clustering, morte do broker antes do ack é perda permanente |
+| RabbitMQ | Single-node: sem replicação, e a morte do broker antes do consumo perde as mensagens não consumidas (o outbox preserva o evento no banco) | Cluster de 3 nós com quorum queues (Amazon MQ), em 3 AZs |
 | Publisher confirms | Implementado: o relay usa `ConfirmChannel`, `mandatory` e só marca publicado após o ack | Igual, com quorum queues para que o ack signifique replicação em maioria |
 | Redis | Standalone | Redis Sentinel ou ElastiCache Multi-AZ, failover automático elimina o pico de miss após reinício |
 | Outbox relay | Processo próprio (`lancamentos-relay`), consulta a cada 1s com `FOR UPDATE SKIP LOCKED`; escala por réplicas | CDC via Debezium lendo o WAL, sem SELECT periódico ao banco, se a latência de 1s não bastar |

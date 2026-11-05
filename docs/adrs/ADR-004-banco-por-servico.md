@@ -1,4 +1,4 @@
-# ADR-004 — Banco por Serviço
+# ADR-004: Banco por Serviço
 
 **Status:** Aceito  
 **Data:** 2026-06-24
@@ -28,11 +28,11 @@ Ambos os serviços conectam no mesmo database e nas mesmas tabelas.
 ## Consequências
 
 **Positivas:**
-- Nenhum serviço pode fazer JOIN nas tabelas do outro — isolamento garantido pelo banco
+- Nenhum serviço pode fazer JOIN nas tabelas do outro: isolamento garantido pelo banco
 - Migrations independentes: cada serviço evolui seu schema sem coordenar com o outro
 - Em produção, cada banco pode ter políticas de backup, retenção e réplicas independentes
 
 **Negativas:**
-- Não existe foreign key entre `lancamentos.lancamentos.id` e `consolidado.saldo_diario.data` — consistência é responsabilidade da camada de evento
+- Não existe foreign key entre `lancamentos.lancamentos.id` e `consolidado.saldo_diario.data`: consistência é responsabilidade da camada de evento
 - Duas strings de conexão para gerenciar
 - Em caso de necessidade de relatório que cruza os dois domínios, seria necessário uma camada de BI/analytics separada

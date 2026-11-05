@@ -1,7 +1,7 @@
 # Infraestrutura isolada para testes de integração.
 # Portas diferentes do stack principal (5432/5672/6379) para rodar em paralelo sem conflito.
 # O nome de projeto separado (desafio-as-it) evita que o down afete o stack principal.
-# Não use este arquivo manualmente — use o script test-integration.sh que sobe, testa e destrói.
+# Não use este arquivo manualmente: use o script test-integration.sh que sobe, testa e destrói.
 
 name: desafio-as-it
 

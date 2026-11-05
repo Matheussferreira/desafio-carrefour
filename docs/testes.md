@@ -31,6 +31,8 @@ A integração contínua (`.github/workflows/ci.yml`) roda lint, verificação d
 
 ## O que cada camada prova, por requisito
 
+A tabela de cenários de falha em [arquitetura.md](arquitetura.md) liga cada falha (consolidado, broker, Redis, bancos, duplicidade, ordem, pico) ao teste que a prova e aponta as lacunas.
+
 | RNF | O que exige | Evidência | Camada |
 |---|---|---|---|
 | RNF-01 Disponibilidade independente | Lançamentos responde 2xx com o consolidado fora do ar | 30 de 30 lançamentos aceitos com o consolidado parado, e o saldo converge quando ele volta ([resiliência](evidencias/)) | Resiliência |

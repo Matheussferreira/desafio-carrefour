@@ -1,4 +1,4 @@
-# ADR-005 — Outbox Pattern para Publicação Confiável de Eventos
+# ADR-005: Outbox Pattern para Publicação Confiável de Eventos
 
 **Status:** Aceito  
 **Data:** 2026-06-24
@@ -43,7 +43,7 @@ Relay (processo lancamentos-relay, a cada 1s):
 ## Alternativas
 
 ### Publicar diretamente após o INSERT
-Sem outbox — publicação inline.  
+Sem outbox, publicação inline.  
 **Descartado:** Cria a janela de inconsistência descrita acima. Não há como tornar atômico o INSERT no Postgres e o publish no RabbitMQ (são dois sistemas distintos sem XA transaction).
 
 ### Saga Pattern com compensação

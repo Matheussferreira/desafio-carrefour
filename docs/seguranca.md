@@ -16,7 +16,7 @@ sequenceDiagram
     S->>K: client_id + client_secret (client credentials)
     K-->>S: access token JWT RS256, validade 300 s
     S->>L: POST /lancamentos (Bearer token)
-    L->>K: GET JWKS (só na 1ª vez ou ao girar a chave; fica em cache)
+    L->>K: GET JWKS (só na 1ª vez ou ao girar a chave, depois fica em cache)
     L->>L: verifica assinatura, iss, aud, exp, escopo e comerciante_id
     L-->>S: 201
     S->>C: GET /consolidado/data (Bearer token)
