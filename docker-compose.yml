@@ -31,12 +31,12 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rabbit}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-rabbit}
-      # Cookie definido pelo entrypoint com dono e permissão corretos.
-      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-cookie-local-dev}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Roda como usuário rabbitmq. Como root, um ping que chega antes de o servidor criar o
+      # .erlang.cookie cria o arquivo com dono root, e o RabbitMQ morre com eacces ao lê-lo.
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10

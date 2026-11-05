@@ -32,9 +32,9 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: rabbit
       RABBITMQ_DEFAULT_PASS: rabbit
-      RABBITMQ_ERLANG_COOKIE: cookie-it
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      # Como usuário rabbitmq (explicação no docker-compose.yml)
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 5s
       retries: 20

@@ -4,13 +4,14 @@
 # Uso: .\scripts\seed-demo.ps1
 param(
     [string]$LancamentosUrl = 'http://localhost:3001',
-    [string]$ConsolidadoUrl = 'http://localhost:3002'
+    [string]$ConsolidadoUrl = 'http://localhost:3002',
+    [string]$Comerciante = 'padrao'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $login = Invoke-RestMethod -Method Post -Uri "$LancamentosUrl/auth/login" `
-    -ContentType 'application/json' -Body '{}'
+    -ContentType 'application/json' -Body (@{ comerciante = $Comerciante } | ConvertTo-Json -Compress)
 $auth = @{ Authorization = "Bearer $($login.token)" }
 
 $hoje = (Get-Date).ToString('yyyy-MM-dd')
@@ -38,5 +39,5 @@ Start-Sleep -Seconds 4
 
 foreach ($dia in @($ontem, $hoje)) {
     $c = Invoke-RestMethod -Uri "$ConsolidadoUrl/consolidado/$dia" -Headers $auth
-    Write-Host ("{0}  creditos={1}  debitos={2}  saldo={3}" -f $c.data, $c.total_creditos, $c.total_debitos, $c.saldo)
+    Write-Host ("{0}  creditos={1}  debitos={2}  resultado={3}  acumulado={4}" -f $c.data, $c.totalCreditos, $c.totalDebitos, $c.resultadoDia, $c.saldoAcumulado)
 }

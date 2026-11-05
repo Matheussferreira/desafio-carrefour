@@ -2,15 +2,16 @@
 # Popula o sistema com lançamentos de exemplo, pela API (nunca direto no banco).
 # Opcional. Pode rodar mais de uma vez no mesmo dia: as chaves de idempotência evitam duplicar.
 #
-# Uso: bash scripts/seed-demo.sh
+# Uso: bash scripts/seed-demo.sh   (COMERCIANTE=loja-1 bash scripts/seed-demo.sh para outro comerciante)
 
 set -euo pipefail
 
 LANCAMENTOS_URL="${LANCAMENTOS_URL:-http://localhost:3001}"
 CONSOLIDADO_URL="${CONSOLIDADO_URL:-http://localhost:3002}"
+COMERCIANTE="${COMERCIANTE:-padrao}"
 
 TOKEN=$(curl -s -X POST "$LANCAMENTOS_URL/auth/login" \
-  -H 'Content-Type: application/json' -d '{}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+  -H 'Content-Type: application/json' -d "{\"comerciante\":\"$COMERCIANTE\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 
 HOJE=$(date +%F)
 ONTEM=$(date -d 'yesterday' +%F 2>/dev/null || date -v-1d +%F)
