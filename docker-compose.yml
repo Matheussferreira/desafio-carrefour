@@ -34,9 +34,11 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      # Roda como usuário rabbitmq. Como root, um ping que chega antes de o servidor criar o
-      # .erlang.cookie cria o arquivo com dono root, e o RabbitMQ morre com eacces ao lê-lo.
-      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
+      # Checagem de porta, que custa quase nada. O rabbitmq-diagnostics ping sobe uma VM Erlang nova
+      # a cada execução e, em uma máquina com poucos núcleos, passou de 100% de CPU por vários segundos
+      # a cada 10 s, roubando CPU dos serviços (p95 do consolidado de 26 ms para mais de 400 ms).
+      # Ele também precisaria rodar como usuário rabbitmq, senão cria um .erlang.cookie de root.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5672"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -100,8 +102,9 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/caixa
       OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
       OIDC_AUDIENCE: lancamentos-api
-      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados. Para desligar o tracing: OTEL_EXPORTER_OTLP_ENDPOINT vazia.
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://jaeger:4318}
+      # Tracing desligado por padrão (sem endpoint, o SDK nem inicia). Para ligar com o Jaeger, use
+      # docker-compose.tracing.yml junto com o profile observability (ver README).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: lancamentos
       TZ: America/Sao_Paulo
     ports:
@@ -129,8 +132,9 @@ services:
       RELAY_PORT: 3003
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lancamentos_db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-rabbit}:${RABBITMQ_PASS:-rabbit}@rabbitmq:5672
-      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados. Para desligar o tracing: OTEL_EXPORTER_OTLP_ENDPOINT vazia.
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://jaeger:4318}
+      # Tracing desligado por padrão (sem endpoint, o SDK nem inicia). Para ligar com o Jaeger, use
+      # docker-compose.tracing.yml junto com o profile observability (ver README).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: lancamentos-relay
       TZ: America/Sao_Paulo
     # Sem porta publicada no host de propósito: assim dá para subir várias réplicas
@@ -163,8 +167,9 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/caixa
       OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
       OIDC_AUDIENCE: consolidado-api
-      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados. Para desligar o tracing: OTEL_EXPORTER_OTLP_ENDPOINT vazia.
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://jaeger:4318}
+      # Tracing desligado por padrão (sem endpoint, o SDK nem inicia). Para ligar com o Jaeger, use
+      # docker-compose.tracing.yml junto com o profile observability (ver README).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: consolidado
       TZ: America/Sao_Paulo
     ports:

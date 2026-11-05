@@ -1,0 +1,13 @@
+# Liga o tracing nos três processos, enviando para o Jaeger do profile observability.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.tracing.yml --profile observability up -d --wait
+# O tracing acrescenta CPU por requisição (ver docs/observabilidade.md); por isso não vem ligado por padrão.
+services:
+  lancamentos:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  lancamentos-relay:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  consolidado:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
