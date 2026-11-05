@@ -100,8 +100,8 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/caixa
       OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
       OIDC_AUDIENCE: lancamentos-api
-      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados. Para desligar o tracing: OTEL_EXPORTER_OTLP_ENDPOINT vazia.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://jaeger:4318}
       OTEL_SERVICE_NAME: lancamentos
       TZ: America/Sao_Paulo
     ports:
@@ -129,8 +129,8 @@ services:
       RELAY_PORT: 3003
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lancamentos_db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-rabbit}:${RABBITMQ_PASS:-rabbit}@rabbitmq:5672
-      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados. Para desligar o tracing: OTEL_EXPORTER_OTLP_ENDPOINT vazia.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://jaeger:4318}
       OTEL_SERVICE_NAME: lancamentos-relay
       TZ: America/Sao_Paulo
     # Sem porta publicada no host de propósito: assim dá para subir várias réplicas
@@ -163,8 +163,8 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/caixa
       OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
       OIDC_AUDIENCE: consolidado-api
-      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      # Traces para o Jaeger (profile observability). Sem o Jaeger no ar, os spans são descartados. Para desligar o tracing: OTEL_EXPORTER_OTLP_ENDPOINT vazia.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://jaeger:4318}
       OTEL_SERVICE_NAME: consolidado
       TZ: America/Sao_Paulo
     ports:
@@ -191,6 +191,7 @@ services:
     profiles: ["loadtest"]
     volumes:
       - ./tests/load:/scripts
+      - ./docs/evidencias:/evidencias
     environment:
       LANCAMENTOS_URL: http://lancamentos:3001
       CONSOLIDADO_URL: http://consolidado:3002
@@ -198,7 +199,7 @@ services:
       KEYCLOAK_URL: http://keycloak:8080
       CLIENT_ID: erp-loja-1
       CLIENT_SECRET: dev-segredo-erp-loja-1
-    command: run /scripts/consolidado.js
+    command: run --summary-export=/evidencias/k6-consolidado-resumo.json /scripts/consolidado.js
     depends_on:
       keycloak:
         condition: service_healthy

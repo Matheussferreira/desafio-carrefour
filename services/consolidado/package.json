@@ -11,7 +11,8 @@
     "test": "jest --forceExit",
     "test:unit": "jest --forceExit",
     "test:integration": "jest --config jest.integration.config.ts --runInBand --forceExit",
-    "lint": "eslint \"{src,tests}/**/*.ts\""
+    "lint": "eslint \"{src,tests}/**/*.ts\"",
+    "bench:auth": "ts-node --transpile-only tests/benchmark/custo-auth.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "1.9.0",

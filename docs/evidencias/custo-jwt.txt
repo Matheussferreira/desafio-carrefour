@@ -1,0 +1,16 @@
+Custo isolado da validação do JWT (services/consolidado/tests/benchmark/custo-auth.ts), npm run bench:auth
+Gerado em 2026-11-05 11:31:22. Máquina de desenvolvimento compartilhada com outros programas; duas execuções seguidas.
+
+Execução 1
+Requisições medidas por servidor: 20000 (após 2000 de aquecimento)
+sem autenticação   media 0.471 ms   p50 0.304   p95 1.050   p99 2.755
+com autenticação   media 0.914 ms   p50 0.615   p95 2.039   p99 4.906
+Custo médio da validação do JWT: 0.443 ms por requisição
+Chamadas ao JWKS durante a medição: 1 (o resto vem do cache)
+
+Execução 2
+Requisições medidas por servidor: 20000 (após 2000 de aquecimento)
+sem autenticação   media 0.509 ms   p50 0.315   p95 1.247   p99 3.408
+com autenticação   media 0.976 ms   p50 0.637   p95 2.482   p99 5.360
+Custo médio da validação do JWT: 0.467 ms por requisição
+Chamadas ao JWKS durante a medição: 1 (o resto vem do cache)

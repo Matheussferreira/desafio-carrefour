@@ -1,0 +1,26 @@
+Trace ponta a ponta de um POST /lancamentos (coletado do Jaeger, API em http://localhost:16686)
+Gerado em 2026-11-05 02:30:55
+
+traceID 438828d7dff50d0f7fb529c7066efd4c
+inicio(ms)  duracao(ms)  servico            operacao
+       0.0        147.0   lancamentos        POST /lancamentos
+      27.0          0.1   lancamentos        router - /
+      48.0         36.2   lancamentos        GET
+     111.0          0.1   lancamentos        router - /lancamentos
+     112.0          0.0   lancamentos        request handler - /
+     118.0          0.2   lancamentos        pg-pool.connect
+     119.0          1.0   lancamentos        pg.query:BEGIN lancamentos_db
+     120.0         13.5   lancamentos        pg.query:INSERT lancamentos_db
+     134.0          3.8   lancamentos        pg.query:INSERT lancamentos_db
+     138.0          3.0   lancamentos        pg.query:COMMIT lancamentos_db
+     988.0         34.6   lancamentos-relay  outbox publicar
+    1024.0         53.5   consolidado        consolidado.lancamentos processar
+    1041.0          0.2   consolidado        pg-pool.connect
+    1041.0          1.5   consolidado        pg.query:BEGIN consolidado_db
+    1045.0          4.7   consolidado        pg.query:INSERT consolidado_db
+    1050.0          6.8   consolidado        pg.query:INSERT consolidado_db
+    1057.0          6.9   consolidado        pg.query:INSERT consolidado_db
+    1064.0          3.4   consolidado        pg.query:COMMIT consolidado_db
+
+Linha de log do consolidado com o mesmo traceId:
+{"level":30,"time":1793856631892,"service":"consolidado","eventoId":"742ec91c-e1e4-4f6f-8a21-5a92ca66d41d","correlationId":"747f6776-f767-41be-adc0-3d1d8a558d7a","comercianteId":"loja-1","lancamentoId":"62048c9e-7134-403c-a5d0-482792167ecb","traceId":"438828d7dff50d0f7fb529c7066efd4c","spanId":"413d972816958880","comercianteId":"loja-1","data":"2036-01-02","tipo":"credito","valor":"12.30","msg":"E

@@ -1,0 +1,55 @@
+Saída do k6 (tests/load/consolidado.js), execução 2, sem as linhas de progresso. Gerado em 2026-11-05 11:43:26.
+Stack com o profile observability ligado e tracing ativo. Máquina de desenvolvimento compartilhada com outros programas.
+
+     /\  /  \     |  |/  /   /  /    
+    /  \/    \    |     (   /   ‾‾\  
+   /          \   |  |\  \ |  (‾)  | 
+  / __________ \  |__| \__\ \_____/ .io
+     execution: local
+        script: /scripts/consolidado.js
+        output: -
+     scenarios: (100.00%) 3 scenarios, 550 max VUs, 3m30s max duration (incl. graceful stop):
+              * cache_hit: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheHitScenario, gracefulStop: 30s)
+              * cache_miss: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheMissScenario, startTime: 1m10s, gracefulStop: 30s)
+              * pico_acima_do_limite: 200.00 iterations/s for 40s (maxVUs: 100-400, exec: picoScenario, startTime: 2m20s, gracefulStop: 30s)
+time="2026-11-05T14:39:37Z" level=info msg="[setup] Populando 2026-06-27 (cache_hit)..." source=console
+time="2026-11-05T14:39:37Z" level=info msg="[setup] Populando 60 datas (cache_miss)..." source=console
+time="2026-11-05T14:39:38Z" level=info msg="[setup] Aguardando propagação (SLA ≤ 5s; margem: 7s)..." source=console
+time="2026-11-05T14:39:45Z" level=info msg="[setup] cache_hit OK → {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-06-27\",\"totalCreditos\":\"1410.00\",\"totalDebitos\":\"1500.00\",\"re" source=console
+time="2026-11-05T14:39:45Z" level=info msg="[setup] cache_miss sample OK → 2026-02-01: {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-02-01\",\"totalCreditos" source=console
+time="2026-11-05T14:39:45Z" level=info msg="[setup] cache_miss sample OK → 2026-04-01: {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-04-01\",\"totalCreditos" source=console
+time="2026-11-05T14:42:16Z" level=warning msg="Insufficient VUs, reached 400 active VUs and cannot initialize more" executor=constant-arrival-rate scenario=pico_acima_do_limite
+pico_acima_do_limite ↓ [ 100% ] 361/400 VUs  40s   200.00 iters/s
+pico_acima_do_limite ↓ [ 100% ] 361/400 VUs  40s   200.00 iters/s
+     ✓ HTTP 200
+     ✗ latência < 500ms
+      ↳  76% — ✓ 4285 / ✗ 1306
+     checks.........................: 88.32% ✓ 9876      ✗ 1306 
+     data_received..................: 14 MB  71 kB/s
+     data_sent......................: 13 MB  68 kB/s
+     dropped_iterations.............: 2720   14.322518/s
+     http_req_blocked...............: avg=529.07µs min=2µs          med=9.12µs   max=631.6ms  p(90)=16.29µs  p(95)=464.92µs
+     http_req_connecting............: avg=402.52µs min=0s           med=0s       max=373.61ms p(90)=0s       p(95)=311.72µs
+     http_req_duration..............: avg=1.37s    min=-689195992ns med=559.41ms max=32.83s   p(90)=1.75s    p(95)=2.7s    
+       { expected_response:true }...: avg=1.37s    min=-689195992ns med=559.41ms max=32.83s   p(90)=1.75s    p(95)=2.7s    
+     ✗ { scenario:cache_hit }.......: avg=198.29ms min=3.52ms       med=7.65ms   max=3.08s    p(90)=633.65ms p(95)=1.35s   
+     ✗ { scenario:cache_miss }......: avg=573.5ms  min=-689195992ns med=129.35ms max=4.46s    p(90)=2s       p(95)=2.82s   
+     http_req_failed................: 0.00%  ✓ 0         ✗ 11356
+     ✓ { scenario:cache_hit }.......: 0.00%  ✓ 0         ✗ 2861 
+     ✓ { scenario:cache_miss }......: 0.00%  ✓ 0         ✗ 2730 
+     http_req_receiving.............: avg=456.77µs min=-830702131ns med=166.09µs max=716.37ms p(90)=315.01µs p(95)=625.56µs
+     http_req_sending...............: avg=247.23µs min=9.5µs        med=76.41µs  max=289.85ms p(90)=133.82µs p(95)=214.46µs
+     http_req_tls_handshaking.......: avg=0s       min=0s           med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=1.37s    min=0s           med=558.64ms max=32.83s   p(90)=1.75s    p(95)=2.69s   
+     http_reqs......................: 11356  59.796512/s
+     iteration_duration.............: avg=1.39s    min=3.85ms       med=568.61ms max=32.85s   p(90)=1.72s    p(95)=2.71s   
+     iterations.....................: 11282  59.406856/s
+   ✓ non_ok_rate....................: 0.00%  ✓ 0         ✗ 5591 
+   ✓ pico_429_sem_retry_after.......: 0.00%  ✓ 0         ✗ 0    
+     pico_respostas_200.............: 5691   29.966709/s
+   ✗ pico_respostas_429.............: 0      0/s
+   ✓ pico_respostas_outras..........: 0      0/s
+     vus............................: 108    min=0       max=400
+     vus_max........................: 538    min=150     max=538
+time="2026-11-05T14:42:48Z" level=error msg="thresholds on metrics 'http_req_duration{scenario:cache_hit}, http_req_duration{scenario:cache_miss}, pico_respostas_429' have been crossed"
+exit=99

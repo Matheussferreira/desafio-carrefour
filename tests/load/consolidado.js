@@ -18,6 +18,11 @@
  *                            Passagens seguintes: Redis.
  *                            Prova: Postgres sob 50 req/s, sem perdas.
  *
+ *   pico_acima_do_limite (T=140–180s) — 200 req/s por 40 s, acima dos 100 req/s da cota
+ *                            do limitador (6.000 req/min por IP). Prova que o excedente
+ *                            recebe 429 com Retry-After, sem 5xx e sem derrubar o serviço.
+ *                            Estas respostas não entram no cálculo de perda do NF-02.
+ *
  * Definição de "perda": qualquer resposta ≠ HTTP 200.
  * Threshold: não_ok_rate < 5% (exit != 0 se violado).
  * Rate limiter ligado: 6.000 req/min (100 req/s) — teste usa 50% da cota.
@@ -25,10 +30,15 @@
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Rate } from 'k6/metrics';
+import { Counter, Rate } from 'k6/metrics';
 import exec from 'k6/execution';
 
 const nonOkRate = new Rate('non_ok_rate');
+// Cenário de pico: o que o limitador de taxa devolve acima da cota
+const pico200 = new Counter('pico_respostas_200');
+const pico429 = new Counter('pico_respostas_429');
+const picoOutros = new Counter('pico_respostas_outras');
+const picoSemRetryAfter = new Rate('pico_429_sem_retry_after');
 
 const TEST_DATE       = __ENV.TEST_DATE       || '2026-06-27';
 const LANCAMENTOS_URL = __ENV.LANCAMENTOS_URL || 'http://localhost:3001';
@@ -67,11 +77,27 @@ export const options = {
       startTime: '70s',  // após cache_hit (60s) + 10s de folga
       exec: 'cacheMissScenario',
     },
+    pico_acima_do_limite: {
+      executor: 'constant-arrival-rate',
+      rate: 200,
+      timeUnit: '1s',
+      duration: '40s',
+      preAllocatedVUs: 100,
+      maxVUs: 400,
+      startTime: '140s',
+      exec: 'picoScenario',
+    },
   },
   thresholds: {
     non_ok_rate:       ['rate<0.05'],
-    http_req_failed:   ['rate<0.05'],
-    http_req_duration: ['p(95)<500'],
+    'http_req_failed{scenario:cache_hit}':  ['rate<0.05'],
+    'http_req_failed{scenario:cache_miss}': ['rate<0.05'],
+    'http_req_duration{scenario:cache_hit}':  ['p(95)<500'],
+    'http_req_duration{scenario:cache_miss}': ['p(95)<500'],
+    // Acima da cota: tem de haver 429, todos com Retry-After, e nada de 5xx ou outro status
+    pico_respostas_429:        ['count>0'],
+    pico_429_sem_retry_after:  ['rate==0'],
+    pico_respostas_outras:     ['count==0'],
   },
 };
 
@@ -202,6 +228,25 @@ export function cacheMissScenario(data) {
     'HTTP 200': r => r.status === 200,
     'latência < 500ms': r => r.timings.duration < 500,
   });
+}
+
+/** Cenário 3: acima da cota do limitador. 200 e 429 são esperados; qualquer outro status é falha. */
+export function picoScenario(data) {
+  const res = http.get(
+    `${CONSOLIDADO_URL}/consolidado/${TEST_DATE}`,
+    {
+      headers: { Authorization: `Bearer ${data.token}` },
+      responseCallback: http.expectedStatuses(200, 429),
+    },
+  );
+  if (res.status === 200) {
+    pico200.add(1);
+  } else if (res.status === 429) {
+    pico429.add(1);
+    picoSemRetryAfter.add(!res.headers['Retry-After']);
+  } else {
+    picoOutros.add(1);
+  }
 }
 
 // k6 requer default export; não é chamado quando todos os cenários usam exec: explícito.

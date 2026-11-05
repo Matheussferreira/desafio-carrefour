@@ -1,0 +1,82 @@
+Saída do k6 (tests/load/consolidado.js), sem as linhas de progresso. Gerado em 2026-11-05 11:01:41.
+Stack com o profile observability ligado (Prometheus, Grafana e Jaeger), tracing ativo nos serviços.
+
+ Container desafio-arquiteto-consolidado-1 Running 
+ Container desafio-arquiteto-postgres-1 Running 
+ Container desafio-arquiteto-keycloak-1 Running 
+ Container desafio-arquiteto-lancamentos-1 Running 
+ Container desafio-arquiteto-redis-1 Running 
+ Container desafio-arquiteto-rabbitmq-1 Running 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-rabbitmq-1 Waiting 
+ Container desafio-arquiteto-redis-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-rabbitmq-1 Healthy 
+ Container desafio-arquiteto-redis-1 Healthy 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Waiting 
+ Container desafio-arquiteto-keycloak-1 Waiting 
+ Container desafio-arquiteto-lancamentos-1 Waiting 
+ Container desafio-arquiteto-lancamentos-1 Healthy 
+ Container desafio-arquiteto-keycloak-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Healthy 
+ Container desafio-arquiteto-k6-run-cdaa25344891 Creating 
+ Container desafio-arquiteto-k6-run-cdaa25344891 Created 
+          /\      |‾‾| /‾‾/   /‾‾/   
+     /\  /  \     |  |/  /   /  /    
+    /  \/    \    |     (   /   ‾‾\  
+   /          \   |  |\  \ |  (‾)  | 
+  / __________ \  |__| \__\ \_____/ .io
+     execution: local
+        script: /scripts/consolidado.js
+        output: -
+     scenarios: (100.00%) 3 scenarios, 550 max VUs, 3m30s max duration (incl. graceful stop):
+              * cache_hit: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheHitScenario, gracefulStop: 30s)
+              * cache_miss: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheMissScenario, startTime: 1m10s, gracefulStop: 30s)
+              * pico_acima_do_limite: 200.00 iterations/s for 40s (maxVUs: 100-400, exec: picoScenario, startTime: 2m20s, gracefulStop: 30s)
+time="2026-11-05T13:57:09Z" level=info msg="[setup] Populando 2026-06-27 (cache_hit)..." source=console
+time="2026-11-05T13:57:09Z" level=info msg="[setup] Populando 60 datas (cache_miss)..." source=console
+Run                    [ 100% ] setup()
+time="2026-11-05T13:57:10Z" level=info msg="[setup] Aguardando propagação (SLA ≤ 5s; margem: 7s)..." source=console
+Run                    [ 100% ] setup()
+Run                    [ 100% ] setup()
+Run                    [ 100% ] setup()
+Run                    [ 100% ] setup()
+Run                    [ 100% ] setup()
+Run                    [ 100% ] setup()
+Run                    [ 100% ] setup()
+time="2026-11-05T13:57:17Z" level=info msg="[setup] cache_hit OK → {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-06-27\",\"totalCreditos\":\"700.00\",\"totalDebitos\":\"750.00\",\"resu" source=console
+time="2026-11-05T13:57:17Z" level=info msg="[setup] cache_miss sample OK → 2026-02-01: {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-02-01\",\"totalCreditos" source=console
+time="2026-11-05T13:57:17Z" level=info msg="[setup] cache_miss sample OK → 2026-04-01: {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-04-01\",\"totalCreditos" source=console
+     ✓ HTTP 200
+     ✗ latência < 500ms
+      ↳  99% — ✓ 5997 / ✗ 5
+     checks.........................: 99.95% ✓ 11999     ✗ 5    
+     data_received..................: 16 MB  85 kB/s
+     data_sent......................: 16 MB  83 kB/s
+     dropped_iterations.............: 325    1.724831/s
+     http_req_blocked...............: avg=53.98µs  min=3.2µs    med=8.9µs    max=32.09ms  p(90)=13µs     p(95)=31.34µs 
+     http_req_connecting............: avg=33.72µs  min=0s       med=0s       max=31.83ms  p(90)=0s       p(95)=0s      
+     http_req_duration..............: avg=208.05ms min=249.62µs med=14.95ms  max=5.38s    p(90)=734.47ms p(95)=1.02s   
+       { expected_response:true }...: avg=208.05ms min=249.62µs med=14.95ms  max=5.38s    p(90)=734.47ms p(95)=1.02s   
+     ✓ { scenario:cache_hit }.......: avg=19.5ms   min=3.7ms    med=7.04ms   max=452.95ms p(90)=39.36ms  p(95)=70.6ms  
+     ✓ { scenario:cache_miss }......: avg=16.25ms  min=3.37ms   med=6.31ms   max=636.02ms p(90)=28.71ms  p(95)=69.66ms 
+     http_req_failed................: 0.00%  ✓ 0         ✗ 13752
+     ✓ { scenario:cache_hit }.......: 0.00%  ✓ 0         ✗ 3001 
+     ✓ { scenario:cache_miss }......: 0.00%  ✓ 0         ✗ 3001 
+     http_req_receiving.............: avg=263.21µs min=25.8µs   med=171.62µs max=28.28ms  p(90)=283.62µs p(95)=448.52µs
+     http_req_sending...............: avg=96.81µs  min=14.8µs   med=76.25µs  max=11.48ms  p(90)=121.11µs p(95)=162.51µs
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=207.69ms min=0s       med=14.48ms  max=5.38s    p(90)=733.49ms p(95)=1.02s   
+     http_reqs......................: 13752  72.984234/s
+     iteration_duration.............: avg=210.31ms min=1.82ms   med=15.76ms  max=8.43s    p(90)=737.71ms p(95)=1.03s   
+     iterations.....................: 13678  72.591503/s
+   ✓ non_ok_rate....................: 0.00%  ✓ 0         ✗ 6002 
+   ✓ pico_429_sem_retry_after.......: 0.00%  ✓ 0         ✗ 2175 
+     pico_respostas_200.............: 5501   29.194755/s
+   ✓ pico_respostas_429.............: 2175   11.5431/s
+   ✓ pico_respostas_outras..........: 0      0/s
+     vus............................: 1      min=0       max=253
+     vus_max........................: 320    min=150     max=320
+exit=0

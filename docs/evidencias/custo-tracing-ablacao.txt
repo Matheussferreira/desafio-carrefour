@@ -1,0 +1,20 @@
+Custo do tracing no consolidado: GET /consolidado/{data} a 50 req/s por 45 s, mesma data (cache quente), k6 tests/load/ablacao.js
+Gerado em 2026-11-05 11:30:02. Máquina de desenvolvimento compartilhada com outros programas (CPU do host a 100% durante as medições).
+Rodadas alternadas, com o consolidado recriado e 30 s de espera antes de cada uma. Jaeger, Prometheus e Grafana parados: no caso LIGADO, os spans são criados mas a exportação falha.
+
+== rodada 1 | tracing DESLIGADO
+✓ http_req_duration..............: avg=16.75ms  min=3.04ms  med=5.9ms    max=334.02ms p(90)=32.44ms  p(95)=74.67ms 
+== rodada 1 | tracing LIGADO (Jaeger parado, spans descartados)
+✓ http_req_duration..............: avg=33.54ms  min=3.71ms  med=8.72ms   max=652.81ms p(90)=74.43ms  p(95)=123.79ms
+== rodada 2 | tracing DESLIGADO
+✓ http_req_duration..............: avg=27.18ms  min=3.03ms  med=6.32ms   max=339.67ms p(90)=86.34ms  p(95)=148.53ms
+== rodada 2 | tracing LIGADO (Jaeger parado, spans descartados)
+✓ http_req_duration..............: avg=64.21ms  min=3.73ms med=11.4ms   max=998.36ms p(90)=185.3ms  p(95)=353.23ms
+(iterações descartadas: dropped_iterations.............: 2      0.044055/s)
+== rodada 3 | tracing DESLIGADO
+✓ http_req_duration..............: avg=21.49ms  min=3.2ms  med=6.1ms    max=335.35ms p(90)=58.88ms  p(95)=96.24ms 
+== rodada 3 | tracing LIGADO (Jaeger parado, spans descartados)
+✓ http_req_duration..............: avg=25.71ms  min=3.49ms  med=9.13ms   max=394.69ms p(90)=72.61ms  p(95)=136.06ms
+== fim
+
+Resumo da mediana (med): DESLIGADO 5.9 / 6.3 / 6.1 ms; LIGADO 8.7 / 11.4 / 9.1 ms.

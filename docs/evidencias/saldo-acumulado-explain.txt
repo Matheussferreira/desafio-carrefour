@@ -1,0 +1,23 @@
+Custo da consulta de saldo acumulado direto no PostgreSQL (EXPLAIN ANALYZE), comerciante loja-2 com 1095 dias de histórico
+Gerado em 2026-11-05 11:36:43. Consulta de src/domain/saldoQueries.ts (consultarDia).
+
+--- data 2023-01-01
+ Aggregate  (cost=8.32..8.33 rows=1 width=128) (actual time=0.076..0.077 rows=1 loops=1)
+   ->  Index Scan using saldo_diario_pkey on saldo_diario  (cost=0.28..8.30 rows=1 width=17) (actual time=0.050..0.051 rows=1 loops=1)
+ Planning Time: 2.767 ms
+ Execution Time: 0.244 ms
+
+--- data 2024-06-30
+ Aggregate  (cost=36.50..36.51 rows=1 width=128) (actual time=0.952..0.953 rows=1 loops=1)
+   ->  Seq Scan on saldo_diario  (cost=0.00..27.45 rows=517 width=17) (actual time=0.044..0.761 rows=547 loops=1)
+ Planning Time: 7.628 ms
+ Execution Time: 1.172 ms
+
+--- data 2025-12-30
+ Aggregate  (cost=45.57..45.58 rows=1 width=128) (actual time=0.760..0.761 rows=1 loops=1)
+   ->  Seq Scan on saldo_diario  (cost=0.00..27.45 rows=1035 width=17) (actual time=0.019..0.522 rows=1095 loops=1)
+ Planning Time: 1.502 ms
+ Execution Time: 0.842 ms
+
+Linhas de loja-2 em saldo_diario:
+1101
