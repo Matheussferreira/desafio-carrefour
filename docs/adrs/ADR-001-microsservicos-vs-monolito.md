@@ -57,3 +57,7 @@ Separar também o outbox relay, o consumer e a API de cada domínio em processos
 - Tracing distribuído mais trabalhoso: uma requisição atravessa dois serviços e um broker; mitigado com `correlationId` propagado no evento, mas ainda inferior à observabilidade de um processo único
 
 **O que eu faria em uma greenfield real a esse volume:** Monolito modular primeiro, com interfaces bem definidas entre os módulos de Lançamentos e Consolidado. Extrairia para microsserviços apenas quando surgisse um requisito que o monolito não pudesse atender — escalabilidade assimétrica, times separados, ou exatamente esse requisito de disponibilidade independente.
+
+## Atualização (ADR-008)
+
+O relay do outbox passou a rodar como processo separado (`lancamentos-relay`), por motivos de resiliência e de escala. A decisão de manter um único serviço de lançamentos e um único serviço de consolidado continua valendo; o que mudou foi apenas o relay.

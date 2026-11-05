@@ -13,7 +13,9 @@ Ambos os serviços expõem `/metrics` sem autenticação, prontos para scraping 
 | `lancamentos_http_requests_total` | Counter | `method, route, status` | Volume de requisições HTTP |
 | `lancamentos_http_request_duration_seconds` | Histogram | `method, route, status` | Latência das requisições; buckets: 5ms a 2.5s |
 | `lancamentos_created_total` | Counter | `tipo` (`credito`\|`debito`) | Lançamentos criados por tipo |
-| `lancamentos_outbox_events_published_total` | Counter | — | Eventos publicados com sucesso pelo relay |
+| `lancamentos_outbox_events_published_total` | Counter | n/a | Eventos publicados e confirmados pelo broker (processo `lancamentos-relay`) |
+| `lancamentos_outbox_publish_failures_total` | Counter | n/a | Lotes do outbox que falharam (sem confirmação, sem rota ou conexão caída) |
+| `lancamentos_rabbitmq_connected` | Gauge | n/a | 1 quando o relay está conectado ao RabbitMQ |
 | Métricas Node.js default | — | — | Heap, GC, CPU, event loop lag |
 
 **Consolidado (`:3002/metrics`):**
@@ -25,6 +27,7 @@ Ambos os serviços expõem `/metrics` sem autenticação, prontos para scraping 
 | `consolidado_events_processed_total` | Counter | `tipo, status` | Eventos processados; `status`: `processed`, `skipped`, `dlq`, `invalid` |
 | `consolidado_consumer_retries_total` | Counter | — | Cada vez que `withRetry` chama o callback `onRetry`; uma mensagem que esgota os retries contribui **3** para este contador (não 4 — a última tentativa falha sem callback) |
 | `consolidado_consumer_dlq_total` | Counter | — | Mensagens enviadas à DLQ após esgotar retries; deve ser próximo de zero em operação normal |
+| `consolidado_rabbitmq_connected` | Gauge | n/a | 1 quando o consumidor está conectado ao RabbitMQ |
 | Métricas Node.js default | — | — | Heap, GC, CPU, event loop lag |
 
 > **Interpretação de `consumer_retries_total`:** O valor N neste counter não significa N execuções de `processEvent` que falharam — significa N callbacks de retry chamados. Uma mensagem que falha 4 vezes (1 inicial + 3 retries) contribui com 3 para `consumer_retries_total` e 1 para `consumer_dlq_total`. Para saber o total de tentativas, some `consumer_retries_total + consumer_dlq_total` (onde cada entry na DLQ representa 1 tentativa não contada no retries counter).
@@ -55,7 +58,7 @@ docker compose logs consolidado | grep "7f3e9c1a"
 | `GET /ready` — lancamentos | Readiness | `SELECT 1` no banco + canal RabbitMQ inicializado |
 | `GET /ready` — consolidado | Readiness | `SELECT 1` no banco + `PING` no Redis + canal RabbitMQ |
 
-O Docker Compose usa `/health` e `/ready` como critério de healthcheck para aguardar os serviços antes de declarar `healthy`.
+O Docker Compose usa `/ready` como healthcheck de `lancamentos`, `lancamentos-relay` e `consolidado`, e `docker compose up --wait` só retorna quando os três estão saudáveis. O `/ready` do consolidado e do relay fica 503 quando a conexão com o RabbitMQ cai; o da API de lançamentos depende apenas do banco.
 
 ### Graceful Shutdown
 

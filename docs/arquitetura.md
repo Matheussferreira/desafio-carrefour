@@ -51,7 +51,7 @@ C4Component
     Container_Boundary(svc, "Serviço Lancamentos") {
         Component(api, "API Routes", "Express Router", "POST /lancamentos (idempotência via X-Idempotency-Key), GET /lancamentos")
         Component(auth, "Auth Middleware", "jsonwebtoken", "Valida JWT em todas as rotas de negócio")
-        Component(relay, "Outbox Relay", "setInterval 1s", "Lê outbox WHERE status=pendente, publica no RabbitMQ, marca publicado; para se buffer do canal encher")
+        Component(relay, "Outbox Relay", "processo lancamentos-relay", "Seleciona o outbox pendente com FOR UPDATE SKIP LOCKED, publica e só marca publicado depois do ack do broker; reconecta com backoff")
         Component(db, "DB Pool", "node-postgres", "Pool de conexões com lancamentos_db; transações ACID para INSERT lancamento + outbox")
         Component(rmq, "RabbitMQ Client", "amqplib", "Conexão persistente; assertExchange + assertQueue na inicialização")
         Component(metrics, "Métricas", "prom-client", "HTTP request counters/histograms, outbox relay counter")
@@ -59,8 +59,8 @@ C4Component
 
     Rel(api, auth, "Passa por antes de qualquer lógica de negócio")
     Rel(api, db, "BEGIN → INSERT lancamento + INSERT outbox → COMMIT (mesma transação)")
-    Rel(relay, db, "SELECT pendente LIMIT 50 → UPDATE publicado (por evento)")
-    Rel(relay, rmq, "channel.publish() com persistent:true e messageId=eventoId")
+    Rel(relay, db, "SELECT pendente LIMIT 50 FOR UPDATE SKIP LOCKED e UPDATE publicado em lote após o ack")
+    Rel(relay, rmq, "publish com persistent, mandatory e messageId=eventoId; aguarda a confirmação")
 ```
 
 ---
@@ -112,7 +112,7 @@ sequenceDiagram
     L->>DB_L: COMMIT
     L-->>C: 201 Created {id, valor, tipo, data}
 
-    Note over L: Relay executa a cada 1s
+    Note over L: O lancamentos-relay executa a cada 1s
 
     L->>DB_L: SELECT outbox WHERE status=pendente ORDER BY created_at LIMIT 50
     L->>RMQ: channel.publish(exchange, routingKey, payload, {persistent:true, messageId:eventoId})

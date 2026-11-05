@@ -3,8 +3,8 @@
 Dois microsserviços independentes: Lancamentos registra débitos e créditos;
 Consolidado mantém a projeção de saldo diário por data. Eles nunca se comunicam
 diretamente. Lancamentos grava o evento na mesma transação do lançamento (Outbox Pattern)
-e um relay o publica no RabbitMQ; Consolidado consome e aplica um upsert atômico no
-próprio banco.
+e um processo separado, o `lancamentos-relay`, o publica no RabbitMQ com confirmação do
+broker; Consolidado consome e aplica um upsert atômico no próprio banco.
 
 A consequência prática: Consolidado pode cair sem interromper o registro de lançamentos.
 O evento fica enfileirado e é processado quando o serviço voltar. Idempotência garante que
@@ -15,8 +15,9 @@ graph TD
     Cliente -->|POST /lancamentos| L[Serviço Lancamentos :3001]
     Cliente -->|GET /consolidado| C[Serviço Consolidado :3002]
 
-    L -->|mesma transação| PG_L[(lancamentos_db)]
-    L -->|outbox relay| MQ[RabbitMQ :5672]
+    L -->|lançamento + outbox, mesma transação| PG_L[(lancamentos_db)]
+    R[lancamentos-relay] -->|lê outbox pendente| PG_L
+    R -->|publica com confirmação| MQ[RabbitMQ :5672]
 
     MQ -->|LancamentoRegistrado| C
     C -->|upsert atômico| PG_C[(consolidado_db)]
@@ -25,6 +26,7 @@ graph TD
     subgraph "Isolamento de falha"
         L
         PG_L
+        R
         MQ
     end
     subgraph "Serviço independente"
@@ -38,9 +40,12 @@ graph TD
 |---|---|---|
 | Comunicação | RabbitMQ assíncrono | Lançamentos nunca depende do Consolidado estar no ar |
 | Persistência de eventos | Outbox Pattern | Evento gravado na mesma transação do lançamento, zero perda se o broker oscilar |
-| Idempotência | `eventos_processados` PK | Redelivery não duplica saldo |
+| Publicação | Relay separado, `ConfirmChannel` e `FOR UPDATE SKIP LOCKED` | Só marca como publicado depois do ack do broker; várias réplicas não duplicam eventos |
+| Idempotência | `eventos_processados` PK no consumidor; `X-Idempotency-Key` com hash do corpo na API | Redelivery não duplica saldo; chave reutilizada com outro corpo devolve 409 |
 | Concorrência no saldo | Upsert atômico (`ON CONFLICT DO UPDATE`) | Sem race condition com múltiplos consumidores |
-| Valores monetários | `NUMERIC(15,2)` + `decimal.js` | Float binário não representa dinheiro com precisão |
+| Valores monetários | String decimal na API, `NUMERIC(15,2)` + `decimal.js` | Float binário não representa dinheiro com precisão |
+| Datas de competência | `DATE` lido como string `YYYY-MM-DD` | Sem deslocamento de dia por fuso e sem timestamp na resposta |
+| Erros HTTP | `application/problem+json` (RFC 7807) | Contrato de erro uniforme; entrada inválida é sempre 400, nunca 500 |
 | Cache | Redis com fallback no banco | GET /consolidado suporta 50 req/s com <5% de perda |
 
 ---
@@ -48,21 +53,49 @@ graph TD
 ## Pré-requisitos
 
 - Docker Desktop >= 4.x
+- Node 20 ou superior, apenas para rodar os testes fora do container
 - Portas livres: 3001, 3002, 5432, 5672, 6379, 15672
 
 ---
 
 ## Subindo o sistema
 
-```bash
-cp .env.example .env
-docker compose up -d
+PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build --wait
+docker compose ps
 ```
 
-Aguarde ~30s. `docker compose ps` deve mostrar os 5 containers (`postgres`, `rabbitmq`,
-`redis`, `lancamentos`, `consolidado`) com status `healthy`.
+Linux ou macOS: `cp .env.example .env` no lugar do `Copy-Item`.
+
+O `--wait` só retorna quando todos os healthchecks passam. `docker compose ps` deve mostrar os
+6 containers (`postgres`, `rabbitmq`, `redis`, `lancamentos`, `lancamentos-relay`,
+`consolidado`) como `healthy`. A primeira execução compila as imagens e leva alguns minutos.
 
 Portas: lancamentos `:3001`, consolidado `:3002`, RabbitMQ Management `:15672`.
+O `lancamentos-relay` não publica porta no host, para poder ter várias réplicas
+(`docker compose up -d --scale lancamentos-relay=3`).
+
+### Dados de exemplo (opcional)
+
+O sistema sobe vazio. Para popular com quatro lançamentos de exemplo, enviados pela API:
+
+```powershell
+.\scripts\seed-demo.ps1
+```
+
+No Linux, macOS ou Git Bash: `bash scripts/seed-demo.sh`. Os scripts podem rodar mais de uma
+vez no mesmo dia, porque usam chaves de idempotência.
+
+### Recomeçar do zero
+
+```powershell
+docker compose down -v
+```
+
+O `-v` apaga os volumes nomeados (`postgres_data`, `rabbitmq_data`, `grafana_data`).
 
 ---
 
@@ -71,20 +104,19 @@ Portas: lancamentos `:3001`, consolidado `:3002`, RabbitMQ Management `:15672`.
 O endpoint `/auth/login` devolve um token JWT sem verificar credenciais e existe para
 facilitar o teste local. Em produção isso seria substituído por OAuth2.
 
-**bash / zsh:**
+PowerShell:
+
+```powershell
+$TOKEN = (Invoke-RestMethod -Method Post http://localhost:3001/auth/login `
+  -ContentType 'application/json' -Body '{}').token
+$H = @{ Authorization = "Bearer $TOKEN" }
+```
+
+bash ou zsh:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:3001/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-```
-
-**PowerShell:**
-
-```powershell
-$TOKEN = (curl.exe -s -XPOST http://localhost:3001/auth/login `
-  -H 'Content-Type: application/json' `
-  -d '{}' | ConvertFrom-Json).token
+  -H 'Content-Type: application/json' -d '{}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 ```
 
 Token válido por 24h. JWT_SECRET padrão: `dev-secret-change-in-production`.
@@ -93,44 +125,58 @@ Token válido por 24h. JWT_SECRET padrão: `dev-secret-change-in-production`.
 
 ## Usando a API
 
-Os exemplos abaixo usam `$TOKEN` (bash/zsh). No PowerShell use `$TOKEN` e substitua
-`curl` por `curl.exe` em todos os comandos para evitar o alias do PowerShell.
+Os exemplos usam PowerShell e as variáveis `$TOKEN` e `$H` da seção anterior.
+
+### Regras do contrato
+
+| Campo | Regra |
+|---|---|
+| `valor` | **String** decimal, maior que zero, até 2 casas e no máximo `999999999.99`. Número JSON (`150.5`) é recusado, porque já chegaria como float. |
+| `tipo` | `credito` ou `debito` |
+| `data` | Data real do calendário no formato `YYYY-MM-DD` (`2026-02-30` é recusada) |
+| `descricao` | Opcional, até 500 caracteres |
+| `X-Idempotency-Key` | Opcional, de 1 a 255 caracteres |
+
+Todas as datas saem das respostas como `YYYY-MM-DD`. Erros seguem a RFC 7807
+(`Content-Type: application/problem+json`): entrada inválida é `400`, chave de idempotência
+reutilizada com outro corpo é `409`.
 
 ### Lançamentos
 
-```bash
-# Registrar crédito
-curl -s -X POST http://localhost:3001/lancamentos \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"valor": 1500.00, "tipo": "credito", "descricao": "Venda produto X", "data": "2026-06-15"}' | jq
+```powershell
+# Registrar crédito (201)
+$corpo = '{"valor":"1500.00","tipo":"credito","descricao":"Venda produto X","data":"2026-06-15"}'
+Invoke-RestMethod -Method Post http://localhost:3001/lancamentos -Headers $H `
+  -ContentType 'application/json' -Body $corpo
 
 # Registrar débito
-curl -s -X POST http://localhost:3001/lancamentos \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"valor": 350.50, "tipo": "debito", "descricao": "Compra insumos", "data": "2026-06-15"}' | jq
+$corpo = '{"valor":"350.50","tipo":"debito","descricao":"Compra de insumos","data":"2026-06-15"}'
+Invoke-RestMethod -Method Post http://localhost:3001/lancamentos -Headers $H `
+  -ContentType 'application/json' -Body $corpo
 
-# Com chave de idempotência, reenvia o mesmo X-Idempotency-Key não cria duplicata
-curl -s -X POST http://localhost:3001/lancamentos \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Idempotency-Key: pedido-7742" \
-  -d '{"valor": 200.00, "tipo": "credito", "descricao": "Ajuste", "data": "2026-06-15"}' | jq
+# Com chave de idempotência: repetir a chamada devolve 200 com o mesmo lançamento
+$H2 = $H + @{ 'X-Idempotency-Key' = 'pedido-7742' }
+$corpo = '{"valor":"200.00","tipo":"credito","descricao":"Ajuste","data":"2026-06-15"}'
+Invoke-RestMethod -Method Post http://localhost:3001/lancamentos -Headers $H2 `
+  -ContentType 'application/json' -Body $corpo
+
+# Mesma chave com outro corpo: 409 Conflict
+Invoke-WebRequest -UseBasicParsing -Method Post http://localhost:3001/lancamentos -Headers $H2 `
+  -ContentType 'application/json' `
+  -Body '{"valor":"999.00","tipo":"credito","data":"2026-06-15"}'
 
 # Listar lançamentos do dia
-curl -s "http://localhost:3001/lancamentos?data=2026-06-15" \
-  -H "Authorization: Bearer $TOKEN" | jq
+Invoke-RestMethod "http://localhost:3001/lancamentos?data=2026-06-15" -Headers $H
 ```
 
 ### Consolidado
 
 O saldo reflete lançamentos com até ~5s de atraso (consistência eventual via RabbitMQ).
 O campo `source` na resposta indica `"cache"` (Redis) ou `"database"` (Postgres, preencheu o cache).
+Um novo lançamento no mesmo dia invalida a chave `saldo:YYYY-MM-DD` no Redis.
 
-```bash
-curl -s "http://localhost:3002/consolidado/2026-06-15" \
-  -H "Authorization: Bearer $TOKEN" | jq
+```powershell
+Invoke-RestMethod "http://localhost:3002/consolidado/2026-06-15" -Headers $H
 ```
 
 ---
@@ -139,24 +185,34 @@ curl -s "http://localhost:3002/consolidado/2026-06-15" \
 
 ### Unitários
 
-Rodam dentro do container, sem infra externa.
+Rodam dentro do container, sem infra externa. Todos importam o código de produção
+(validação, hash de idempotência, interpretação de eventos, cálculo de delta, backoff, retry
+e contrato HTTP dos erros).
 
-```bash
-docker compose run --rm lancamentos npm test   # 9 testes
-docker compose run --rm consolidado npm test   # 14 testes
+```powershell
+docker compose run --rm lancamentos npm test
+docker compose run --rm consolidado npm test
 ```
 
-### Integração — DLQ e retry com broker real
+### Integração, com Postgres, RabbitMQ e Redis reais
 
-```bash
-bash test-integration.sh
+```powershell
+.\test-integration.ps1
 ```
 
-Sobe infra isolada (postgres:5433, rabbitmq:5673, redis:6380), roda o teste e destrói tudo.
-Tempo esperado: ~15s.
+No Linux, macOS ou Git Bash: `bash test-integration.sh`.
 
-O que é testado: retry com backoff exponencial, dead-letter após 3 tentativas, e
-processamento válido sem interação com DLQ, tudo contra um broker RabbitMQ real, não mock.
+Sobe a infra isolada (postgres:5433, rabbitmq:5673, redis:6380), roda os testes dos dois
+serviços e derruba tudo, passando ou falhando. Precisa de Node 20 ou superior no host.
+
+O que é coberto:
+
+- Lançamento e evento do outbox gravados na mesma transação, e desfeitos juntos quando a gravação do outbox falha
+- Idempotência, inclusive com 10 requisições simultâneas na mesma chave, e 409 para corpo diferente
+- Relay: nada é marcado como publicado sem confirmação do broker, nem quando a mensagem volta por falta de rota
+- 3 relays concorrentes publicando 200 eventos sem duplicar nem perder
+- Reconexão ao RabbitMQ de verdade, derrubando as conexões no broker
+- Consumidor: retry com backoff, DLQ, evento malformado direto para a DLQ, idempotência e invalidação do cache
 
 ---
 
@@ -166,7 +222,7 @@ Prova o requisito de 50 req/s em `GET /consolidado/{data}` com < 5% de perda.
 Dois cenários em sequência: cache quente (Redis) e pior caso (Postgres, 60 datas distintas).
 Exit code 0 = todos os thresholds passaram.
 
-```bash
+```powershell
 docker compose --profile loadtest run --rm k6
 ```
 
@@ -174,30 +230,45 @@ Detalhes, thresholds e saída esperada em `tests/load/README.md`.
 
 ---
 
-## Isolamento de falha — verificação manual
+## Isolamento de falha, verificação manual
 
-```bash
+```powershell
 # Derruba o Consolidado
 docker compose stop consolidado
 
-# Lançamentos continua respondendo 201, o isolamento funciona
-curl -s -X POST http://localhost:3001/lancamentos \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"valor": 999.00, "tipo": "credito", "descricao": "Teste de isolamento", "data": "2026-06-20"}' | jq
+# Lançamentos continua respondendo 201
+$corpo = '{"valor":"999.00","tipo":"credito","descricao":"Teste de isolamento","data":"2026-06-20"}'
+Invoke-RestMethod -Method Post http://localhost:3001/lancamentos -Headers $H `
+  -ContentType 'application/json' -Body $corpo
 
-# Sobe o Consolidado, drena a fila automaticamente
-docker compose start consolidado
-sleep 5
+# Sobe o Consolidado; ele drena a fila sozinho
+docker compose up -d --wait consolidado
+Start-Sleep -Seconds 5
 
-# Saldo aparece, consistência eventual
-curl -s "http://localhost:3002/consolidado/2026-06-20" \
-  -H "Authorization: Bearer $TOKEN" | jq
+# O saldo aparece (consistência eventual)
+Invoke-RestMethod "http://localhost:3002/consolidado/2026-06-20" -Headers $H
 ```
 
-O lançamento foi gravado no banco e no outbox na mesma transação. O relay publicou no broker.
-Quando o Consolidado voltou, consumiu o evento e aplicou o upsert. Nenhum evento perdido,
-nenhum duplicado.
+O lançamento foi gravado no banco e no outbox na mesma transação, e o relay publicou no broker
+com confirmação. Quando o Consolidado voltou, consumiu o evento e aplicou o upsert. Nenhum
+evento perdido, nenhum duplicado.
+
+### Derrubando o RabbitMQ
+
+```powershell
+docker compose stop rabbitmq
+# A API de lançamentos continua em /ready = 200 e aceitando lançamentos.
+# O consolidado e o lancamentos-relay ficam em /ready = 503.
+(Invoke-WebRequest -UseBasicParsing http://localhost:3001/ready).StatusCode
+$corpo = '{"valor":"10.00","tipo":"credito","data":"2026-06-21"}'
+Invoke-RestMethod -Method Post http://localhost:3001/lancamentos -Headers $H `
+  -ContentType 'application/json' -Body $corpo
+
+docker compose start rabbitmq
+# Os dois serviços reconectam sozinhos e o evento pendente é publicado.
+```
+
+O lançamento fica pendente no outbox enquanto o broker está fora e é publicado quando ele volta.
 
 ---
 
@@ -215,7 +286,7 @@ docker compose --profile observability up -d
 ## Documentação
 
 - `docs/arquitetura.md` — C4 Context/Container/Component com diagramas Mermaid
-- `docs/adrs/` — 7 ADRs cobrindo as decisões de projeto
+- `docs/adrs/`: 8 ADRs cobrindo as decisões de projeto
 - `docs/requisitos.md` — requisitos funcionais e não-funcionais
 - `docs/seguranca.md` — autenticação, rate limiting, modelo de segurança para produção
 - `docs/arquitetura-alvo-cloud.md` — deploy na AWS (ECS, RDS, MQ, ElastiCache)
@@ -232,9 +303,9 @@ Simplificações conscientes, não esquecimentos.
 |---|---|---|
 | Instâncias de banco | `lancamentos_db` e `consolidado_db` no mesmo Postgres | Instâncias separadas (RDS separados), um banco sobrecarregado não degrada o outro |
 | RabbitMQ | Single-node | Cluster de 3 nós com quorum queues, sem clustering, morte do broker antes do ack é perda permanente |
-| Publisher confirms | `channel.publish()` marca publicado quando o buffer TCP aceita | `channel.waitForConfirms()` antes de marcar, sem confirms, o broker pode morrer antes de persistir |
+| Publisher confirms | Implementado: o relay usa `ConfirmChannel`, `mandatory` e só marca publicado após o ack | Igual, com quorum queues para que o ack signifique replicação em maioria |
 | Redis | Standalone | Redis Sentinel ou ElastiCache Multi-AZ, failover automático elimina o pico de miss após reinício |
-| Outbox relay | `setInterval` de 1s consultando `status='pendente'` | CDC via Debezium lendo o WAL e reage em ~50ms, sem SELECT periódico ao banco |
+| Outbox relay | Processo próprio (`lancamentos-relay`), consulta a cada 1s com `FOR UPDATE SKIP LOCKED`; escala por réplicas | CDC via Debezium lendo o WAL, sem SELECT periódico ao banco, se a latência de 1s não bastar |
 | Migrações | Rodam no startup do serviço | Passo separado no pipeline de CI/CD antes de qualquer instância nova subir e evita colisão entre pods |
 | Autenticação | JWT com secret em `.env`, endpoint `/auth/login` sem credenciais | OAuth2/OIDC (Cognito, Keycloak) com tokens de curta duração, o endpoint sem credenciais é uma vulnerabilidade em produção |
 | TLS | HTTP puro | TLS em endpoints públicos; mTLS ou service mesh na comunicação interna |

@@ -13,10 +13,10 @@
 ### Validação de Input
 
 - Todos os inputs de API validados com **zod** antes de qualquer acesso ao banco
-- `valor`: número positivo (rejeita zero, negativo e não-numérico)
+- `valor`: string decimal positiva, até 2 casas e no máximo 999999999.99. Número JSON é recusado, porque já chegaria como float
 - `tipo`: enum estrito `credito` | `debito`
-- `data`: regex `YYYY-MM-DD`; não valida calendário (ex: 2024-02-30 passaria), mas o banco rejeita datas inválidas
-- `valor` armazenado como `NUMERIC(15,2)` — nunca `float`; processado como `Decimal` (decimal.js) na aplicação
+- `data`: precisa ser uma data real do calendário no formato `YYYY-MM-DD` (2024-02-30 é recusada com 400)
+- `valor` armazenado como `NUMERIC(15,2)`, nunca `float`; processado como `Decimal` (decimal.js) na aplicação
 
 ### Idempotency Key
 

@@ -30,7 +30,7 @@ Colocar os dois no mesmo processo os tornaria **cúmplices em falha**: um crash 
 | **Data do Lançamento** | Data de **competência** informada pelo cliente (`YYYY-MM-DD`) — determina em qual dia o saldo é afetado, independente do horário de processamento |
 | **Chave de Idempotência** | Token opaco do cliente (`X-Idempotency-Key`) que identifica uma intenção de requisição; o servidor retorna a resposta original se a mesma chave aparecer novamente |
 | **Outbox** | Tabela interna (`outbox`) que contém o evento `LancamentoRegistrado` gravado na mesma transação do lançamento; não é exposta na API |
-| **Relay** | Processo interno (`setInterval` de 1s) que lê o outbox pendente e publica no broker; parte do serviço Lançamentos |
+| **Relay** | Processo separado (`lancamentos-relay`) que lê o outbox pendente a cada 1s e publica no broker com confirmação; pode ter várias réplicas |
 | **Evento de domínio** | `LancamentoRegistrado` — publicado após cada lançamento aceito, pelo Relay, via outbox |
 
 ### BC: Consolidação Financeira

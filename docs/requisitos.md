@@ -13,8 +13,8 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 | # | Requisito |
 |---|---|
 | RF-01 | Registrar um lançamento (débito ou crédito) com valor, tipo, descrição opcional e data de competência |
-| RF-02 | Validar que `valor` é positivo, `tipo` é `credito` ou `debito`, e `data` está no formato YYYY-MM-DD |
-| RF-03 | Suportar chave de idempotência do cliente via header `X-Idempotency-Key` (opcional; sem ela, cada request cria um lançamento) |
+| RF-02 | Validar que `valor` é uma string decimal positiva com até 2 casas e no máximo 999999999.99, que `tipo` é `credito` ou `debito`, e que `data` é uma data real no formato YYYY-MM-DD. Qualquer violação é 400 com `application/problem+json` |
+| RF-03 | Suportar chave de idempotência via header `X-Idempotency-Key` (opcional; sem ela, cada request cria um lançamento). Mesma chave com o mesmo corpo devolve o lançamento original (200); com corpo diferente devolve 409 |
 | RF-04 | Listar lançamentos com filtro opcional por data de competência |
 | RF-05 | Publicar o evento `LancamentoRegistrado` no broker de forma confiável: o evento é gravado na mesma transação do lançamento (Outbox Pattern), garantindo zero perda mesmo que o broker esteja temporariamente indisponível |
 
@@ -38,7 +38,7 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 | RNF-03 | **Perda de requisições** | Menos de 5% sob 50 req/s | Rate limiter de 6.000 req/min por IP + cache absorvendo picos |
 | RNF-04 | **Latência** | p95 < 500ms no `GET /consolidado` | Cache hit típico <1ms; miss + Postgres ~5ms; SLO de produção sugerido: p95 < 100ms (cache hit) / p95 < 200ms (miss) |
 | RNF-05 | **Consistência eventual** | Saldo reflete todos os lançamentos em até ~5s após o registro | Outbox relay a cada 1s + propagação AMQP <5ms + processamento do consumer |
-| RNF-06 | **Sem perda de eventos** | Nenhum `LancamentoRegistrado` pode ser perdido | Outbox: evento gravado na transação do lançamento; broker: fila durável; relay: retenta indefinidamente |
+| RNF-06 | **Sem perda de eventos** | Nenhum `LancamentoRegistrado` pode ser perdido | Outbox: evento gravado na transação do lançamento; broker: fila durável; relay: só marca como publicado após a confirmação do broker (publisher confirms), retenta indefinidamente e pode rodar em várias réplicas sem duplicar (`FOR UPDATE SKIP LOCKED`) |
 | RNF-07 | **Idempotência** | Redelivery de evento nunca duplica o saldo | `eventos_processados` com `ON CONFLICT DO NOTHING` na mesma transação do upsert de saldo |
 | RNF-08 | **Segurança** | Endpoints de negócio exigem JWT; valores monetários nunca como float | JWT Bearer em todas as rotas protegidas; `NUMERIC(15,2)` no banco; `decimal.js` na aplicação |
 | RNF-09 | **Entrega at-least-once** | O broker pode entregar a mesma mensagem mais de uma vez; o sistema deve ser resiliente a isso | Ver RNF-07; `prefetch=1` por consumer garante ordenação sequencial por processo |

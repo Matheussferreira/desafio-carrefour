@@ -32,10 +32,12 @@ Transação ACID:
   INSERT INTO outbox (id, tipo_evento, payload, status='pendente')
   COMMIT  ← se falhar aqui, ambos são desfeitos
 
-Relay (assíncrono, a cada 1s):
-  SELECT * FROM outbox WHERE status='pendente'
-  → Publish to RabbitMQ
+Relay (processo lancamentos-relay, a cada 1s):
+  BEGIN
+  SELECT ... FROM outbox WHERE status='pendente' LIMIT 50 FOR UPDATE SKIP LOCKED
+  → publish no RabbitMQ (ConfirmChannel) e aguarda o ack de cada mensagem
   → UPDATE outbox SET status='publicado'
+  COMMIT  ← qualquer falha antes daqui desfaz tudo e as linhas continuam pendentes
 ```
 
 ## Alternativas
@@ -61,5 +63,5 @@ Capturar as mudanças no WAL do Postgres e publicar automaticamente.
 
 **Negativas:**
 - Latência adicional: o evento chega ao broker com delay de até `outbox_interval_ms` (padrão 1s)
-- O relay precisa rodar continuamente (é parte do processo lancamentos)
-- Possibilidade de duplicatas: se o relay publicar e cair antes de marcar como publicado, o evento será publicado de novo na próxima execução — o consumidor deve ser idempotente (e é, via `eventos_processados`)
+- O relay precisa rodar continuamente; roda como processo próprio (ver ADR-008)
+- Possibilidade de duplicatas: se o relay publicar e cair antes de marcar como publicado, o evento será publicado de novo na próxima execução, e por isso o consumidor deve ser idempotente (e é, via `eventos_processados`)
