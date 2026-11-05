@@ -1,0 +1,75 @@
+import jwt from 'jsonwebtoken';
+import request from 'supertest';
+import app from '../../src/app';
+import { chaveAtualizadoAte, chaveIndice, chaveSaldo, scoreDaData } from '../../src/cache/saldoCache';
+import { config } from '../../src/config';
+import { diasNoIntervalo } from '../../src/domain/data';
+
+const auth = { Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: 'loja-a' }, config.jwtSecret)}` };
+
+describe('diasNoIntervalo', () => {
+  it('conta as duas pontas', () => {
+    expect(diasNoIntervalo('2026-06-15', '2026-06-15')).toBe(1);
+    expect(diasNoIntervalo('2026-06-15', '2026-06-17')).toBe(3);
+  });
+
+  it('atravessa mês, ano e dia bissexto', () => {
+    expect(diasNoIntervalo('2026-12-30', '2027-01-02')).toBe(4);
+    expect(diasNoIntervalo('2028-02-28', '2028-03-01')).toBe(3);
+    expect(diasNoIntervalo('2026-02-28', '2026-03-01')).toBe(2);
+  });
+
+  it('não sofre com mudança de horário de verão', () => {
+    expect(diasNoIntervalo('2026-03-01', '2026-11-30')).toBe(275);
+  });
+});
+
+describe('chaves de cache', () => {
+  it('são separadas por comerciante e não colidem entre si', () => {
+    expect(chaveSaldo('loja-a', '2026-06-15')).toBe('saldo:loja-a:2026-06-15');
+    expect(chaveSaldo('loja-b', '2026-06-15')).not.toBe(chaveSaldo('loja-a', '2026-06-15'));
+    expect(chaveIndice('loja-a')).toBe('saldo:idx:loja-a');
+    expect(chaveAtualizadoAte('loja-a')).toBe('saldo:ate:loja-a');
+  });
+
+  it('o score da data mantém a ordem cronológica', () => {
+    expect(scoreDaData('2026-06-15')).toBe(20260615);
+    expect(scoreDaData('2026-12-31')).toBeLessThan(scoreDaData('2027-01-01'));
+    expect(scoreDaData('2026-02-09')).toBeLessThan(scoreDaData('2026-02-10'));
+  });
+});
+
+describe('GET /consolidado (intervalo): validação sem tocar no banco', () => {
+  const get = (qs: string) => request(app).get(`/consolidado${qs}`).set(auth);
+
+  it.each([
+    ['sem parâmetros', ''],
+    ['só inicio', '?inicio=2026-06-01'],
+    ['data inexistente', '?inicio=2026-02-30&fim=2026-03-05'],
+    ['formato errado', '?inicio=01/06/2026&fim=05/06/2026'],
+    ['inicio depois de fim', '?inicio=2026-06-10&fim=2026-06-01'],
+  ])('%s: 400 problem+json', async (_nome, qs) => {
+    const res = await get(qs);
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toMatch(/application\/problem\+json/);
+  });
+
+  it('acima do limite de dias: 400 com o máximo no corpo', async () => {
+    const res = await get('?inicio=2026-01-01&fim=2026-12-31');
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ type: '/problems/interval-too-large', maxDias: config.maxDiasIntervalo });
+  });
+});
+
+describe('autenticação por comerciante', () => {
+  it('token sem claim de comerciante: 403', async () => {
+    const semClaim = jwt.sign({ sub: 'x' }, config.jwtSecret);
+    const res = await request(app).get('/consolidado/2026-06-15').set('Authorization', `Bearer ${semClaim}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('login de desenvolvimento emite o claim', async () => {
+    const res = await request(app).post('/auth/login').send({ comerciante: 'loja-3' });
+    expect(jwt.verify(res.body.token, config.jwtSecret)).toMatchObject({ comerciante_id: 'loja-3' });
+  });
+});

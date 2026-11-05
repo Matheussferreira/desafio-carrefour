@@ -2,7 +2,7 @@ import type { Channel, ConsumeMessage } from 'amqplib';
 import { QUEUE } from '../rabbitmq';
 import type { ResilientBroker } from '../broker/resilientBroker';
 import { pool } from '../db';
-import { getRedis } from '../redis';
+import { gravarAtualizadoAte, invalidarAPartirDe } from '../cache/saldoCache';
 import { logger } from '../logger';
 import {
   eventsProcessedTotal,
@@ -22,9 +22,10 @@ const RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 export async function processEvent(
   evento: EventoLancamentoRegistrado,
 ): Promise<'processed' | 'skipped'> {
-  const { eventoId, correlationId, data: payload } = evento;
-  const log = logger.child({ eventoId, correlationId, lancamentoId: payload.lancamentoId });
+  const { eventoId, correlationId, comercianteId, data: payload } = evento;
+  const log = logger.child({ eventoId, correlationId, comercianteId, lancamentoId: payload.lancamentoId });
   const delta = calcularDelta(payload.tipo, payload.valor);
+  let atualizadoAte = '';
 
   const client = await pool.connect();
   try {
@@ -45,15 +46,27 @@ export async function processEvent(
 
     // Upsert atômico: o banco soma, a aplicação nunca lê e reescreve o saldo
     await client.query(
-      `INSERT INTO saldo_diario (data, total_creditos, total_debitos, saldo, updated_at)
-       VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (data) DO UPDATE SET
-         total_creditos = saldo_diario.total_creditos + $2,
-         total_debitos  = saldo_diario.total_debitos  + $3,
-         saldo          = saldo_diario.saldo          + $4,
+      `INSERT INTO saldo_diario (comerciante_id, data, total_creditos, total_debitos, saldo, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (comerciante_id, data) DO UPDATE SET
+         total_creditos = saldo_diario.total_creditos + $3,
+         total_debitos  = saldo_diario.total_debitos  + $4,
+         saldo          = saldo_diario.saldo          + $5,
          updated_at     = now()`,
-      [payload.data, delta.creditos, delta.debitos, delta.saldo],
+      [comercianteId, payload.data, delta.creditos, delta.debitos, delta.saldo],
     );
+
+    // Até onde este comerciante está atualizado: o maior instante de lançamento já aplicado
+    const { rows } = await client.query<{ ultimo_evento_em: Date }>(
+      `INSERT INTO comerciante_progresso (comerciante_id, ultimo_evento_em)
+       VALUES ($1, $2)
+       ON CONFLICT (comerciante_id) DO UPDATE SET
+         ultimo_evento_em = GREATEST(comerciante_progresso.ultimo_evento_em, EXCLUDED.ultimo_evento_em),
+         processado_em    = now()
+       RETURNING ultimo_evento_em`,
+      [comercianteId, evento.createdAt ?? new Date().toISOString()],
+    );
+    atualizadoAte = rows[0].ultimo_evento_em.toISOString();
 
     await client.query('COMMIT');
   } catch (err) {
@@ -63,14 +76,17 @@ export async function processEvent(
     client.release();
   }
 
-  // Invalida o cache depois do commit; falha aqui não desfaz o processamento
+  // Depois do commit: invalida a data e as posteriores do comerciante (o acumulado delas muda)
+  // e publica o atualizadoAte. Falha no Redis não desfaz o processamento.
   try {
-    await getRedis().del(`saldo:${payload.data}`);
+    const apagadas = await invalidarAPartirDe(comercianteId, payload.data);
+    await gravarAtualizadoAte(comercianteId, atualizadoAte);
+    log.debug({ apagadas }, 'Cache invalidado');
   } catch (cacheErr) {
     log.warn({ cacheErr }, 'Failed to invalidate cache (non-fatal)');
   }
 
-  log.info({ data: payload.data, tipo: payload.tipo, valor: payload.valor }, 'Event processed');
+  log.info({ comercianteId, data: payload.data, tipo: payload.tipo, valor: payload.valor }, 'Event processed');
   return 'processed';
 }
 

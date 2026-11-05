@@ -11,4 +11,6 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET ?? 'dev-secret-change-in-production',
   nodeEnv: process.env.NODE_ENV ?? 'development',
   cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS ?? 60),
+  // Maior intervalo aceito em GET /consolidado?inicio=&fim=, em dias corridos (inclusive)
+  maxDiasIntervalo: Number(process.env.MAX_DIAS_INTERVALO ?? 92),
 };

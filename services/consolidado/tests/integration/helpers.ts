@@ -21,7 +21,7 @@ export interface Infra {
 /** Sobe o mesmo caminho de produção: migrations, Redis, consumidor ligado ao broker resiliente. */
 export async function iniciarInfra(): Promise<Infra> {
   await runMigrations(pool);
-  await pool.query('TRUNCATE saldo_diario, eventos_processados');
+  await pool.query('TRUNCATE saldo_diario, eventos_processados, comerciante_progresso');
   await connectRedis();
   iniciarConsumidor(broker);
   broker.start();
@@ -48,13 +48,27 @@ export function publicarEvento(ch: Channel, evento: { eventoId: string }): void 
   });
 }
 
-export function montarEvento(eventoId: string, data: string, valor: string, tipo: 'credito' | 'debito' = 'credito') {
+export interface OpcoesEvento {
+  /** Padrão 'padrao'. Com null monta um evento 1.0 antigo, sem comercianteId. */
+  comercianteId?: string | null;
+  createdAt?: string;
+}
+
+export function montarEvento(
+  eventoId: string,
+  data: string,
+  valor: string,
+  tipo: 'credito' | 'debito' = 'credito',
+  opcoes: OpcoesEvento = {},
+) {
+  const comercianteId = opcoes.comercianteId === undefined ? 'padrao' : opcoes.comercianteId;
   return {
     eventoId,
-    schemaVersion: '1.0',
+    schemaVersion: comercianteId === null ? '1.0' : '1.1',
     tipo: 'LancamentoRegistrado',
+    ...(comercianteId === null ? {} : { comercianteId }),
     correlationId: `it-${eventoId.slice(0, 8)}`,
-    createdAt: new Date().toISOString(),
+    createdAt: opcoes.createdAt ?? new Date().toISOString(),
     data: {
       lancamentoId: eventoId.replace(/^./, 'f'),
       valor,

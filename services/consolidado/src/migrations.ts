@@ -21,9 +21,29 @@ const migrations = [
       );
     `,
   },
+  {
+    // Multi-comerciante. A chave primária de saldo_diario passa a ser (comerciante_id, data), o
+    // que também serve o índice da soma acumulada por intervalo de datas. Linhas existentes
+    // ficam com o comerciante padrao. comerciante_progresso guarda, por comerciante, o instante
+    // do último evento aplicado (campo atualizadoAte da API).
+    name: '002_multi_comerciante',
+    sql: `
+      ALTER TABLE saldo_diario ADD COLUMN IF NOT EXISTS comerciante_id TEXT NOT NULL DEFAULT 'padrao';
+      ALTER TABLE saldo_diario ALTER COLUMN comerciante_id DROP DEFAULT;
+      ALTER TABLE saldo_diario DROP CONSTRAINT IF EXISTS saldo_diario_pkey;
+      ALTER TABLE saldo_diario ADD PRIMARY KEY (comerciante_id, data);
+
+      CREATE TABLE IF NOT EXISTS comerciante_progresso (
+        comerciante_id    TEXT        PRIMARY KEY,
+        ultimo_evento_em  TIMESTAMPTZ NOT NULL,
+        processado_em     TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
 ];
 
-export async function runMigrations(pool: Pool): Promise<void> {
+/** Aplica as migrations pendentes. O parâmetro `ate` (nome da migration) existe para testar upgrades. */
+export async function runMigrations(pool: Pool, ate?: string): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS _migrations (
       id     SERIAL      PRIMARY KEY,
@@ -37,10 +57,14 @@ export async function runMigrations(pool: Pool): Promise<void> {
       'SELECT 1 FROM _migrations WHERE name = $1',
       [m.name],
     );
-    if (rowCount && rowCount > 0) continue;
+    if (rowCount && rowCount > 0) {
+      if (ate && m.name === ate) return;
+      continue;
+    }
 
     await pool.query(m.sql);
     await pool.query('INSERT INTO _migrations (name) VALUES ($1)', [m.name]);
     logger.info({ migration: m.name }, 'Migration applied');
+    if (ate && m.name === ate) return;
   }
 }

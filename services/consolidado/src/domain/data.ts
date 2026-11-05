@@ -11,3 +11,12 @@ export function isDataReal(valor: string): boolean {
   const d = new Date(Date.UTC(ano, mes - 1, dia));
   return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
 }
+
+const MS_POR_DIA = 86_400_000;
+
+/** Quantidade de dias corridos entre duas datas YYYY-MM-DD válidas, contando as duas pontas. */
+export function diasNoIntervalo(inicio: string, fim: string): number {
+  const [ai, mi, di] = inicio.split('-').map(Number);
+  const [af, mf, df] = fim.split('-').map(Number);
+  return Math.round((Date.UTC(af, mf - 1, df) - Date.UTC(ai, mi - 1, di)) / MS_POR_DIA) + 1;
+}
