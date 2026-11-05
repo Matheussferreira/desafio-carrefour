@@ -237,6 +237,11 @@ services:
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./observability/alerts.yml:/etc/prometheus/alerts.yml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     ports:
       - "9090:9090"
 
@@ -258,6 +263,13 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    healthcheck:
+      # Sem isso o "up --wait" volta antes de o Grafana aceitar conexões (leva cerca de 1 minuto)
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     ports:
       - "3000:3000"
     depends_on:

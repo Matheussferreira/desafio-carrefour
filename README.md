@@ -170,7 +170,7 @@ docker compose -f docker-compose.yml -f docker-compose.tracing.yml --profile obs
 | Jaeger | http://localhost:16686 | só com o arquivo `docker-compose.tracing.yml`; procure o serviço `lancamentos` |
 | RabbitMQ | http://localhost:15672 (`rabbit`/`rabbit`) | filas, DLQ e conexões |
 
-O tracing vem desligado por padrão porque acrescenta CPU por requisição ([docs/observabilidade.md](docs/observabilidade.md)). Para ver um trace, registre um lançamento (`.\scripts\seed-demo.ps1`): o mesmo trace atravessa a API, o relay e o consolidado, e os logs trazem `traceId`. `.\scripts\verificar-dashboard.ps1` confere no Prometheus que cada painel tem dado.
+O tracing vem desligado por padrão porque acrescenta CPU por requisição ([docs/observabilidade.md](docs/observabilidade.md)). Para ver um trace, registre um lançamento (`.\scripts\seed-demo.ps1`): o mesmo trace atravessa a API, o relay e o consolidado, e os logs trazem `traceId`. `.\scripts\verificar-dashboard.ps1` confere no Prometheus que cada painel tem dado. Rode depois de gerar tráfego novo (alguns lançamentos e consultas pela API, ou o k6) e de esperar cerca de 40 s: os painéis de taxa ficam vazios sem tráfego recente, e o `seed-demo` repetido não gera eventos novos porque reaproveita as chaves de idempotência.
 
 ## Decisões de arquitetura
 

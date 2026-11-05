@@ -19,7 +19,7 @@ Os preços unitários vêm da API pública de lista de preços da AWS (`pricing.
 | Cognito | 20261020233814 |
 | X-Ray | 20260911124622 |
 
-Validação na calculadora: **pendente** (a ser preenchida com a data em que for feita: ____/____/______).
+Validação na calculadora oficial: **não realizada**. Os valores acima vêm só da lista de preços pública; refaça a conta na calculadora antes de qualquer compromisso de orçamento.
 
 ## Premissas
 
