@@ -25,7 +25,7 @@ const migrations = [
     // Multi-comerciante. A chave primária de saldo_diario passa a ser (comerciante_id, data), o
     // que também serve o índice da soma acumulada por intervalo de datas. Linhas existentes
     // ficam com o comerciante padrao. comerciante_progresso guarda, por comerciante, o instante
-    // do último evento aplicado (campo atualizadoAte da API).
+    // do último evento aplicado (campo ultimoEventoAplicadoEm da API).
     name: '002_multi_comerciante',
     sql: `
       ALTER TABLE saldo_diario ADD COLUMN IF NOT EXISTS comerciante_id TEXT NOT NULL DEFAULT 'padrao';

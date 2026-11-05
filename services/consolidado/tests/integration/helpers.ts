@@ -3,6 +3,7 @@ import { pool } from '../../src/db';
 import { runMigrations } from '../../src/migrations';
 import { connectRedis, closeRedis } from '../../src/redis';
 import { broker, EXCHANGE, ROUTING_KEY } from '../../src/rabbitmq';
+import { versaoAtual } from '../../src/cache/saldoCache';
 import { consumerAtivo, iniciarConsumidor, stopConsumer } from '../../src/consumer/lancamentosConsumer';
 
 export async function aguardar(condicao: () => boolean | Promise<boolean>, ms = 20_000): Promise<void> {
@@ -85,4 +86,17 @@ export async function valorContador(counter: {
 }): Promise<number> {
   const { values } = await counter.get();
   return values.reduce((soma, v) => soma + v.value, 0);
+}
+
+/**
+ * Publica o evento e só retorna quando o consumidor terminou de verdade: a linha está no banco
+ * E a versão do cache do comerciante avançou (último passo do consumidor).
+ */
+export async function publicarEAguardar(ch: Channel, evento: { eventoId: string }, comercianteId = 'padrao'): Promise<void> {
+  const antes = await versaoAtual(comercianteId);
+  publicarEvento(ch, evento);
+  await aguardar(async () => {
+    const { rows } = await pool.query('SELECT 1 FROM eventos_processados WHERE evento_id = $1', [evento.eventoId]);
+    return rows.length === 1 && (await versaoAtual(comercianteId)) !== antes;
+  }, 10_000);
 }

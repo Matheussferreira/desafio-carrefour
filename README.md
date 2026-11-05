@@ -203,7 +203,7 @@ Invoke-RestMethod "http://localhost:3002/consolidado/2026-06-15" -Headers $H
   "totalDebitos": "350.50",
   "resultadoDia": "1349.50",
   "saldoAcumulado": "5120.00",
-  "atualizadoAte": "2026-06-15T18:42:10.123Z"
+  "ultimoEventoAplicadoEm": "2026-06-15T18:42:10.123Z"
 }
 ```
 
@@ -211,7 +211,7 @@ Invoke-RestMethod "http://localhost:3002/consolidado/2026-06-15" -Headers $H
 |---|---|
 | `resultadoDia` | Créditos menos débitos da data |
 | `saldoAcumulado` | Soma do resultado de todos os dias do comerciante até a data, inclusive |
-| `atualizadoAte` | Instante do último lançamento já aplicado. Lançamentos mais novos que isso ainda estão a caminho (consistência eventual, em geral poucos segundos). `null` se o comerciante nunca teve lançamento |
+| `ultimoEventoAplicadoEm` | O maior `createdAt` entre os eventos já aplicados. Indica o atraso aproximado, **não garante completude**: com eventos fora de ordem, um lançamento mais antigo que esse instante ainda pode estar a caminho. `null` se o comerciante nunca teve lançamento |
 | `source` | `cache` (Redis) ou `database` |
 
 Dia sem movimento não é erro: responde 200 com zeros no dia e o acumulado vigente.
@@ -222,9 +222,11 @@ Intervalo, com um item por dia (inclusive vazios) e limite de 92 dias:
 Invoke-RestMethod "http://localhost:3002/consolidado?inicio=2026-06-01&fim=2026-06-30" -Headers $H
 ```
 
-O cache é por comerciante e data (`saldo:{comerciante}:{data}`, TTL de 60 s). Um lançamento em
-uma data apaga o cache dessa data e das posteriores do comerciante, porque o acumulado delas
-também muda. Decisões e trade-offs no ADR-009.
+O cache é por comerciante, versão e data (`saldo:{comerciante}:v{versao}:{data}`, TTL de 60 s). A
+versão é um contador por comerciante que o consumidor incrementa depois de aplicar cada evento:
+o que estava em cache sob a versão anterior deixa de ser lido. Isso cobre o lançamento retroativo
+(o acumulado das datas seguintes também muda) e fecha a corrida em que uma leitura lenta gravava
+o valor antigo depois da invalidação. Decisões e trade-offs no ADR-009.
 
 ---
 
@@ -257,8 +259,8 @@ O que é coberto:
 - Lançamento e evento do outbox gravados na mesma transação, e desfeitos juntos quando a gravação do outbox falha
 - Idempotência, inclusive com 10 requisições simultâneas na mesma chave, e 409 para corpo diferente
 - Isolamento entre comerciantes (lançamentos, idempotência, saldo e cache), com o comerciante vindo do token
-- Saldo acumulado correto com lançamento retroativo, que invalida a data e as posteriores mas não as anteriores
-- Dia sem movimento (200 com zeros), `atualizadoAte` e consulta por intervalo com limite de dias
+- Saldo acumulado correto com lançamento retroativo, e corrida simulada entre uma leitura lenta e um evento (o valor antigo nunca é servido)
+- Dia sem movimento (200 com zeros), `ultimoEventoAplicadoEm` e consulta por intervalo com limite de dias
 - Upgrade das migrations sobre dados que já existiam, em banco temporário
 - Relay: nada é marcado como publicado sem confirmação do broker, nem quando a mensagem volta por falta de rota
 - 3 relays concorrentes publicando 200 eventos sem duplicar nem perder

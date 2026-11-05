@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../../src/app';
-import { chaveAtualizadoAte, chaveIndice, chaveSaldo, scoreDaData } from '../../src/cache/saldoCache';
+import { chaveSaldo, chaveUltimoEventoAplicadoEm, chaveVersao } from '../../src/cache/saldoCache';
 import { config } from '../../src/config';
 import { diasNoIntervalo } from '../../src/domain/data';
 
@@ -25,17 +25,15 @@ describe('diasNoIntervalo', () => {
 });
 
 describe('chaves de cache', () => {
-  it('são separadas por comerciante e não colidem entre si', () => {
-    expect(chaveSaldo('loja-a', '2026-06-15')).toBe('saldo:loja-a:2026-06-15');
-    expect(chaveSaldo('loja-b', '2026-06-15')).not.toBe(chaveSaldo('loja-a', '2026-06-15'));
-    expect(chaveIndice('loja-a')).toBe('saldo:idx:loja-a');
-    expect(chaveAtualizadoAte('loja-a')).toBe('saldo:ate:loja-a');
+  it('são separadas por comerciante e carregam a versão', () => {
+    expect(chaveSaldo('loja-a', '7', '2026-06-15')).toBe('saldo:loja-a:v7:2026-06-15');
+    expect(chaveSaldo('loja-b', '7', '2026-06-15')).not.toBe(chaveSaldo('loja-a', '7', '2026-06-15'));
+    expect(chaveVersao('loja-a')).toBe('saldo:ver:loja-a');
+    expect(chaveUltimoEventoAplicadoEm('loja-a')).toBe('saldo:ultimo:loja-a');
   });
 
-  it('o score da data mantém a ordem cronológica', () => {
-    expect(scoreDaData('2026-06-15')).toBe(20260615);
-    expect(scoreDaData('2026-12-31')).toBeLessThan(scoreDaData('2027-01-01'));
-    expect(scoreDaData('2026-02-09')).toBeLessThan(scoreDaData('2026-02-10'));
+  it('versões diferentes geram chaves diferentes para a mesma data', () => {
+    expect(chaveSaldo('loja-a', '7', '2026-06-15')).not.toBe(chaveSaldo('loja-a', '8', '2026-06-15'));
   });
 });
 

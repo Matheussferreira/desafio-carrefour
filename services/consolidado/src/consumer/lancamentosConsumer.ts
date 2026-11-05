@@ -2,7 +2,7 @@ import type { Channel, ConsumeMessage } from 'amqplib';
 import { QUEUE } from '../rabbitmq';
 import type { ResilientBroker } from '../broker/resilientBroker';
 import { pool } from '../db';
-import { gravarAtualizadoAte, invalidarAPartirDe } from '../cache/saldoCache';
+import { avancarVersao, gravarUltimoEventoAplicadoEm } from '../cache/saldoCache';
 import { logger } from '../logger';
 import {
   eventsProcessedTotal,
@@ -25,7 +25,7 @@ export async function processEvent(
   const { eventoId, correlationId, comercianteId, data: payload } = evento;
   const log = logger.child({ eventoId, correlationId, comercianteId, lancamentoId: payload.lancamentoId });
   const delta = calcularDelta(payload.tipo, payload.valor);
-  let atualizadoAte = '';
+  let ultimoEventoAplicadoEm = '';
 
   const client = await pool.connect();
   try {
@@ -66,7 +66,7 @@ export async function processEvent(
        RETURNING ultimo_evento_em`,
       [comercianteId, evento.createdAt ?? new Date().toISOString()],
     );
-    atualizadoAte = rows[0].ultimo_evento_em.toISOString();
+    ultimoEventoAplicadoEm = rows[0].ultimo_evento_em.toISOString();
 
     await client.query('COMMIT');
   } catch (err) {
@@ -76,12 +76,13 @@ export async function processEvent(
     client.release();
   }
 
-  // Depois do commit: invalida a data e as posteriores do comerciante (o acumulado delas muda)
-  // e publica o atualizadoAte. Falha no Redis não desfaz o processamento.
+  // Depois do commit: avança a versão do cache do comerciante (todas as datas dele passam a
+  // ser lidas do banco, o que cobre o lançamento retroativo) e publica o ultimoEventoAplicadoEm.
+  // A ordem importa: commit primeiro, versão por último (quem vê a versão nova já vê o resto). Falha no Redis não desfaz o processamento.
   try {
-    const apagadas = await invalidarAPartirDe(comercianteId, payload.data);
-    await gravarAtualizadoAte(comercianteId, atualizadoAte);
-    log.debug({ apagadas }, 'Cache invalidado');
+    await gravarUltimoEventoAplicadoEm(comercianteId, ultimoEventoAplicadoEm);
+    const versao = await avancarVersao(comercianteId);
+    log.debug({ versao }, 'Versão do cache avançada');
   } catch (cacheErr) {
     log.warn({ cacheErr }, 'Failed to invalidate cache (non-fatal)');
   }

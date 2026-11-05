@@ -87,7 +87,7 @@ export async function consultarIntervalo(
 }
 
 /** Instante (ISO) do último evento aplicado para o comerciante, ou null se nunca houve. */
-export async function consultarAtualizadoAte(pool: Pool, comercianteId: string): Promise<string | null> {
+export async function consultarUltimoEventoAplicadoEm(pool: Pool, comercianteId: string): Promise<string | null> {
   const { rows } = await pool.query<{ ultimo_evento_em: Date }>(
     'SELECT ultimo_evento_em FROM comerciante_progresso WHERE comerciante_id = $1',
     [comercianteId],

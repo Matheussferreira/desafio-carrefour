@@ -2,59 +2,59 @@ import { config } from '../config';
 import { getRedis } from '../redis';
 
 // Chaves, todas por comerciante:
-//   saldo:{comerciante}:{data}   resposta do dia (JSON) com TTL
-//   saldo:idx:{comerciante}      sorted set com as datas em cache (score = YYYYMMDD), para
-//                                invalidar "a partir de uma data" sem varrer o Redis
-//   saldo:ate:{comerciante}      instante do último evento aplicado (atualizadoAte)
+//   saldo:ver:{comerciante}                 contador de versão, incrementado a cada evento aplicado
+//   saldo:{comerciante}:v{versao}:{data}    resposta do dia (JSON), com TTL
+//   saldo:ultimo:{comerciante}              ultimoEventoAplicadoEm
 // O identificador do comerciante não admite dois-pontos, então as chaves não colidem.
+//
+// Por que versão na chave: apagar chaves depois de um evento deixa uma janela em que uma leitura
+// lenta, que consultou o banco antes do commit, grava o valor antigo depois da invalidação. Com a
+// versão na chave isso deixa de importar: o leitor grava sob a versão que leu ANTES de consultar o
+// banco, e o consumidor incrementa a versão DEPOIS do commit. Uma gravação atrasada cai numa chave
+// de versão velha, que nenhuma leitura nova usa, e expira sozinha pelo TTL.
 
-export const chaveSaldo = (comercianteId: string, data: string): string => `saldo:${comercianteId}:${data}`;
-export const chaveIndice = (comercianteId: string): string => `saldo:idx:${comercianteId}`;
-export const chaveAtualizadoAte = (comercianteId: string): string => `saldo:ate:${comercianteId}`;
+export const chaveVersao = (comercianteId: string): string => `saldo:ver:${comercianteId}`;
+export const chaveSaldo = (comercianteId: string, versao: string, data: string): string =>
+  `saldo:${comercianteId}:v${versao}:${data}`;
+export const chaveUltimoEventoAplicadoEm = (comercianteId: string): string => `saldo:ultimo:${comercianteId}`;
 
-/** 2026-06-15 vira 20260615, ordenável como número. */
-export const scoreDaData = (data: string): number => Number(data.replace(/-/g, ''));
+/**
+ * Versão atual do cache do comerciante. Se o contador não existe (Redis novo, flush ou eviction),
+ * ele nasce com o relógio em milissegundos. Assim uma versão nova nunca coincide com uma anterior,
+ * mesmo que chaves antigas ainda estejam no Redis.
+ */
+export async function versaoAtual(comercianteId: string): Promise<string> {
+  const redis = getRedis();
+  const chave = chaveVersao(comercianteId);
+  const atual = await redis.get(chave);
+  if (atual !== null) return atual;
+  await redis.set(chave, String(Date.now()), 'NX');
+  return (await redis.get(chave)) ?? '0';
+}
 
-export async function lerSaldo<T>(comercianteId: string, data: string): Promise<T | null> {
-  const bruto = await getRedis().get(chaveSaldo(comercianteId, data));
+/** Chamado pelo consumidor depois do commit: invalida todo o cache do comerciante de uma vez. */
+export async function avancarVersao(comercianteId: string): Promise<string> {
+  const resultados = await getRedis()
+    .multi()
+    .set(chaveVersao(comercianteId), String(Date.now()), 'NX')
+    .incr(chaveVersao(comercianteId))
+    .exec();
+  return String(resultados?.[1]?.[1] ?? '');
+}
+
+export async function lerSaldo<T>(comercianteId: string, versao: string, data: string): Promise<T | null> {
+  const bruto = await getRedis().get(chaveSaldo(comercianteId, versao, data));
   return bruto ? (JSON.parse(bruto) as T) : null;
 }
 
-export async function gravarSaldo(comercianteId: string, data: string, valor: object): Promise<void> {
-  const ttl = config.cacheTtlSeconds;
-  const indice = chaveIndice(comercianteId);
-  await getRedis()
-    .multi()
-    .setex(chaveSaldo(comercianteId, data), ttl, JSON.stringify(valor))
-    .zadd(indice, scoreDaData(data), data)
-    // O índice precisa sobreviver a todas as chaves que ele aponta; ele é renovado a cada gravação
-    .expire(indice, ttl + 60)
-    .exec();
+export async function gravarSaldo(comercianteId: string, versao: string, data: string, valor: object): Promise<void> {
+  await getRedis().setex(chaveSaldo(comercianteId, versao, data), config.cacheTtlSeconds, JSON.stringify(valor));
 }
 
-/**
- * Apaga do cache o saldo da data e de todas as datas posteriores do comerciante, que é o
- * alcance de um lançamento naquela data (o acumulado das datas seguintes também muda).
- * Datas anteriores continuam em cache. Devolve quantas chaves foram apagadas.
- */
-export async function invalidarAPartirDe(comercianteId: string, data: string): Promise<number> {
-  const redis = getRedis();
-  const indice = chaveIndice(comercianteId);
-  const score = scoreDaData(data);
-  const datas = await redis.zrangebyscore(indice, score, '+inf');
-  if (datas.length === 0) return 0;
-  await redis
-    .multi()
-    .del(...datas.map(d => chaveSaldo(comercianteId, d)))
-    .zremrangebyscore(indice, score, '+inf')
-    .exec();
-  return datas.length;
+export async function lerUltimoEventoAplicadoEm(comercianteId: string): Promise<string | null> {
+  return getRedis().get(chaveUltimoEventoAplicadoEm(comercianteId));
 }
 
-export async function lerAtualizadoAte(comercianteId: string): Promise<string | null> {
-  return getRedis().get(chaveAtualizadoAte(comercianteId));
-}
-
-export async function gravarAtualizadoAte(comercianteId: string, instanteIso: string): Promise<void> {
-  await getRedis().set(chaveAtualizadoAte(comercianteId), instanteIso);
+export async function gravarUltimoEventoAplicadoEm(comercianteId: string, instanteIso: string): Promise<void> {
+  await getRedis().set(chaveUltimoEventoAplicadoEm(comercianteId), instanteIso);
 }

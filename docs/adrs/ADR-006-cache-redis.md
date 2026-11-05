@@ -39,7 +39,7 @@ GET /consolidado/:data
   └─ Redis DOWN → fallback direto no Postgres, sem erro para o cliente
 ```
 
-Invalidação ativa: ao processar um `LancamentoRegistrado`, o consumer apaga, após o COMMIT, o cache da data do lançamento e das datas posteriores do mesmo comerciante, porque o acumulado delas também muda. A chave é `saldo:{comerciante}:{data}` (ver ADR-009). O próximo request vai ao banco e repopula o cache.
+Invalidação ativa: ao processar um `LancamentoRegistrado`, o consumer avança, após o COMMIT, a versão do cache do comerciante (contador no Redis incluído na chave `saldo:{comerciante}:v{versao}:{data}`). O próximo request usa a versão nova, vai ao banco e repopula o cache. Detalhes, inclusive a corrida que isso elimina, no ADR-009.
 
 ---
 

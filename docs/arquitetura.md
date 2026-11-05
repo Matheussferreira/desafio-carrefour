@@ -37,7 +37,7 @@ C4Container
     Rel(lancamentos, mq, "Publica LancamentoRegistrado (via Outbox Relay)", "AMQP")
     Rel(consolidado, mq, "Consome LancamentoRegistrado; NACK → DLX → DLQ", "AMQP")
     Rel(consolidado, pg_c, "Upsert saldo_diario, INSERT eventos_processados", "SQL")
-    Rel(consolidado, redis, "GET/SET/DEL saldo:{comerciante}:{data}", "Redis protocol")
+    Rel(consolidado, redis, "GET/SET saldo:{comerciante}:v{versao}:{data}, INCR saldo:ver:{comerciante}", "Redis protocol")
 ```
 
 ---
@@ -77,17 +77,17 @@ C4Component
         Component(consumer, "Consumer", "amqplib + withRetry", "prefetch=1; 1 tentativa inicial + 3 retries com backoff 1s/2s/4s; NACK sem requeue após esgotar → DLQ")
         Component(retry, "withRetry", "utility pura", "Executa fn até maxRetries+1 vezes; onRetry callback por cada falha intermediária; retorna Result discriminado")
         Component(db_c, "DB Pool", "node-postgres", "Pool para consolidado_db; transações para INSERT eventos_processados + UPSERT saldo_diario")
-        Component(redis_c, "Redis Client", "ioredis", "GET saldo:{comerciante}:{data} → hit retorna JSON; miss → query DB → SETEX 60s; após cada evento apaga a data e as posteriores do comerciante")
+        Component(redis_c, "Redis Client", "ioredis", "GET saldo:{comerciante}:v{versao}:{data} → hit retorna JSON; miss → query DB → SETEX 60s; após cada evento incrementa a versão do comerciante")
         Component(rmq_c, "RabbitMQ Client", "amqplib", "assertExchange + assertQueue + bindQueue; DLX configurado via x-dead-letter-exchange; prefetch=1")
         Component(metrics_c, "Métricas", "prom-client", "HTTP counters, events_processed_total por tipo/status, consumer_retries_total, consumer_dlq_total")
     }
 
     Rel(api_c, auth_c, "Passa por antes de qualquer lógica de negócio")
-    Rel(api_c, redis_c, "GET saldo:{comerciante}:{data}")
+    Rel(api_c, redis_c, "GET saldo:{comerciante}:v{versao}:{data}")
     Rel(api_c, db_c, "Fallback: soma de saldo_diario do comerciante até a data")
     Rel(consumer, retry, "withRetry(() => processEvent(raw), 3, [1000,2000,4000])")
     Rel(retry, db_c, "BEGIN → INSERT eventos_processados (ON CONFLICT DO NOTHING) → UPSERT saldo_diario → COMMIT")
-    Rel(retry, redis_c, "invalida a data e as posteriores após o COMMIT (falha não-fatal)")
+    Rel(retry, redis_c, "INCR da versão do comerciante após o COMMIT (falha não-fatal)")
     Rel(consumer, rmq_c, "ACK em sucesso ou skip; NACK(false,false) após esgotar retries → DLQ via DLX")
 ```
 
@@ -124,19 +124,19 @@ sequenceDiagram
     Note over DB_C: rowCount=1 → evento novo; rowCount=0 → já processado, skip + ACK
     CONS->>DB_C: UPSERT saldo_diario (comerciante, data) SET saldo = saldo_diario.saldo + delta; UPSERT comerciante_progresso
     CONS->>DB_C: COMMIT
-    CONS->>REDIS: invalida saldo:{comerciante}:{data} e as datas posteriores
+    CONS->>REDIS: INCR saldo:ver:{comerciante} (invalida o cache do comerciante)
     CONS->>RMQ: channel.ack(msg)
 
     C->>CONS: GET /consolidado/2026-06-24
-    CONS->>REDIS: GET saldo:loja-7:2026-06-24
+    CONS->>REDIS: GET saldo:loja-7:v{versao}:2026-06-24
     alt cache hit
         REDIS-->>CONS: JSON {totalCreditos, totalDebitos, resultadoDia, saldoAcumulado}
     else cache miss
         CONS->>DB_C: SELECT somas FROM saldo_diario WHERE comerciante_id=$1 AND data <= $2
         DB_C-->>CONS: row
-        CONS->>REDIS: SETEX saldo:loja-7:2026-06-24 60
+        CONS->>REDIS: SETEX saldo:loja-7:v{versao}:2026-06-24 60
     end
-    CONS-->>C: 200 {totalCreditos, totalDebitos, resultadoDia, saldoAcumulado, atualizadoAte, source}
+    CONS-->>C: 200 {totalCreditos, totalDebitos, resultadoDia, saldoAcumulado, ultimoEventoAplicadoEm, source}
 ```
 
 ---

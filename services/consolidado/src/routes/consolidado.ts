@@ -4,33 +4,34 @@ import { config } from '../config';
 import { logger } from '../logger';
 import { diasNoIntervalo, isDataReal } from '../domain/data';
 import {
-  consultarAtualizadoAte,
+  consultarUltimoEventoAplicadoEm,
   consultarDia,
   consultarIntervalo,
   SaldoDia,
 } from '../domain/saldoQueries';
 import {
-  gravarAtualizadoAte,
+  gravarUltimoEventoAplicadoEm,
   gravarSaldo,
-  lerAtualizadoAte,
+  lerUltimoEventoAplicadoEm,
   lerSaldo,
+  versaoAtual,
 } from '../cache/saldoCache';
 import { sendProblem } from '../http/problem';
 
 const router = Router();
 
-/** atualizadoAte vem do Redis (atualizado pelo consumidor a cada evento) e cai para o banco. */
-async function obterAtualizadoAte(comercianteId: string): Promise<string | null> {
+/** ultimoEventoAplicadoEm vem do Redis (atualizado pelo consumidor a cada evento) e cai para o banco. */
+async function obterUltimoEventoAplicadoEm(comercianteId: string): Promise<string | null> {
   try {
-    const emCache = await lerAtualizadoAte(comercianteId);
+    const emCache = await lerUltimoEventoAplicadoEm(comercianteId);
     if (emCache) return emCache;
   } catch (err) {
-    logger.warn({ err }, 'Redis indisponível ao ler atualizadoAte, usando o banco');
+    logger.warn({ err }, 'Redis indisponível ao ler ultimoEventoAplicadoEm, usando o banco');
   }
-  const doBanco = await consultarAtualizadoAte(pool, comercianteId);
+  const doBanco = await consultarUltimoEventoAplicadoEm(pool, comercianteId);
   if (doBanco) {
     try {
-      await gravarAtualizadoAte(comercianteId, doBanco);
+      await gravarUltimoEventoAplicadoEm(comercianteId, doBanco);
     } catch {
       // cache é otimização
     }
@@ -60,11 +61,11 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 
   try {
-    const [itens, atualizadoAte] = await Promise.all([
+    const [itens, ultimoEventoAplicadoEm] = await Promise.all([
       consultarIntervalo(pool, comercianteId, inicio, fim),
-      obterAtualizadoAte(comercianteId),
+      obterUltimoEventoAplicadoEm(comercianteId),
     ]);
-    res.json({ comercianteId, inicio, fim, atualizadoAte, dias: itens });
+    res.json({ comercianteId, inicio, fim, ultimoEventoAplicadoEm, dias: itens });
   } catch (err) {
     next(err);
   }
@@ -84,9 +85,13 @@ router.get('/:data', async (req: Request, res: Response, next: NextFunction) => 
     let saldo: SaldoDia | null = null;
     let source: 'cache' | 'database' = 'cache';
 
-    // 1. Cache por comerciante e data. Falha do Redis não derruba a leitura.
+    // 1. Cache por comerciante, versão e data. A versão é lida ANTES de consultar o banco: se um
+    //    evento for aplicado enquanto esta leitura está em andamento, a gravação abaixo cai numa
+    //    versão velha, que ninguém mais lê. Falha do Redis não derruba a leitura.
+    let versao: string | null = null;
     try {
-      saldo = await lerSaldo<SaldoDia>(comercianteId, data);
+      versao = await versaoAtual(comercianteId);
+      saldo = await lerSaldo<SaldoDia>(comercianteId, versao, data);
     } catch (cacheErr) {
       logger.warn({ cacheErr }, 'Redis unavailable, falling back to database');
     }
@@ -95,15 +100,17 @@ router.get('/:data', async (req: Request, res: Response, next: NextFunction) => 
     if (!saldo) {
       source = 'database';
       saldo = await consultarDia(pool, comercianteId, data);
-      try {
-        await gravarSaldo(comercianteId, data, saldo);
-      } catch {
-        // não bloqueia a resposta
+      if (versao !== null) {
+        try {
+          await gravarSaldo(comercianteId, versao, data, saldo);
+        } catch {
+          // não bloqueia a resposta
+        }
       }
     }
 
-    const atualizadoAte = await obterAtualizadoAte(comercianteId);
-    res.json({ source, comercianteId, ...saldo, atualizadoAte });
+    const ultimoEventoAplicadoEm = await obterUltimoEventoAplicadoEm(comercianteId);
+    res.json({ source, comercianteId, ...saldo, ultimoEventoAplicadoEm });
   } catch (err) {
     next(err);
   }

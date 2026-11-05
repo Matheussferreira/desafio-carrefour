@@ -24,11 +24,11 @@ O consolidado devolve **as duas medidas**, com nomes que não se confundem:
 | `totalCreditos`, `totalDebitos` | Movimento da data |
 | `resultadoDia` | `totalCreditos - totalDebitos` da data |
 | `saldoAcumulado` | Soma do `resultadoDia` de todos os dias do comerciante até a data, inclusive |
-| `atualizadoAte` | Instante de lançamento do último evento já aplicado para o comerciante |
+| `ultimoEventoAplicadoEm` | O **maior `createdAt`** entre os eventos já aplicados para o comerciante |
 
-`atualizadoAte` torna a consistência eventual explícita: o cliente sabe até quando os números refletem lançamentos, em vez de supor que estão em tempo real. Se há lançamentos mais novos que `atualizadoAte`, eles ainda estão a caminho.
+`ultimoEventoAplicadoEm` torna a consistência eventual visível: o cliente vê até que ponto os números já refletem lançamentos, em vez de supor que estão em tempo real. **Não é uma garantia de completude.** Como é o maior `createdAt` aplicado, e não "tudo até este instante foi aplicado", um evento mais antigo que ele ainda pode estar em trânsito quando os eventos chegam fora de ordem (relay com várias réplicas, reentrega, retry, DLQ reprocessada). Use-o como indicador de atraso aproximado, não como marca d'água para concluir que lançamentos anteriores a ele estão incluídos. Uma marca d'água verdadeira exigiria sequência por comerciante no produtor, o que fica como evolução.
 
-Dia sem movimento **não é erro**: responde 200 com zeros no dia e o acumulado vigente. Comerciante sem nenhum evento responde zeros e `atualizadoAte: null`.
+Dia sem movimento **não é erro**: responde 200 com zeros no dia e o acumulado vigente. Comerciante sem nenhum evento responde zeros e `ultimoEventoAplicadoEm: null`.
 
 Também existe `GET /consolidado?inicio=&fim=`, que devolve um item por dia (inclusive os vazios) com o acumulado correndo, limitado a 92 dias corridos (configurável em `MAX_DIAS_INTERVALO`). O limite protege o banco de uma consulta sem teto.
 
@@ -48,9 +48,11 @@ A chave primária `(comerciante_id, data)` serve esse intervalo diretamente. O d
 
 ### Cache
 
-- Chave `saldo:{comerciante}:{data}`, com TTL de 60 s, como antes, agora por comerciante.
-- Um lançamento em uma data D muda o acumulado de D e de **todas as datas posteriores**. Por isso o consumidor, depois do commit, apaga o cache de D e de todas as datas maiores do comerciante. Datas anteriores a D continuam em cache, porque não mudam. Para saber quais datas estão em cache sem varrer o Redis, cada comerciante tem um sorted set `saldo:idx:{comerciante}` com as datas em cache (score `YYYYMMDD`).
-- O `atualizadoAte` fica fora do JSON do dia e vive em `saldo:ate:{comerciante}`, gravado pelo consumidor a cada evento. Assim ele nunca fica defasado dentro do TTL de um dia antigo que ainda está em cache.
+- Chave `saldo:{comerciante}:v{versao}:{data}`, com TTL de 60 s. A versão vem de um contador por comerciante, `saldo:ver:{comerciante}`.
+- Um lançamento em uma data D muda o acumulado de D e de **todas as datas posteriores**. Em vez de apagar chaves, o consumidor **incrementa o contador** do comerciante depois do commit. As leituras sempre usam a versão atual; tudo o que estava em cache sob a versão anterior deixa de ser lido e expira pelo TTL. Isso cobre o lançamento retroativo sem precisar saber quais datas estão em cache, e dispensa o índice de datas e a varredura que existiam antes.
+- **Por que versão e não apagar chaves.** Com `DEL`, havia uma corrida: um GET que consultou o banco antes do commit podia gravar o valor antigo depois da invalidação, e ele ficava no cache até o TTL, violando o RNF-05. Com a versão, o leitor **lê a versão antes de consultar o banco** e grava sob essa versão. Se um evento for aplicado nesse meio tempo, o consumidor já terá avançado a versão (o incremento vem depois do commit), e a gravação atrasada cai numa chave de versão velha que nenhuma leitura nova usa. Ordem do consumidor: commit, depois `ultimoEventoAplicadoEm`, depois o incremento da versão.
+- Se o contador some (flush, eviction, Redis novo), ele nasce com o relógio em milissegundos (`SET NX`), de modo que uma versão nova nunca coincide com uma anterior mesmo que restem chaves antigas.
+- O `ultimoEventoAplicadoEm` fica fora do JSON do dia e vive em `saldo:ultimo:{comerciante}`, gravado pelo consumidor a cada evento. Assim ele não fica defasado dentro do TTL de um dia que ainda está em cache.
 
 ```mermaid
 sequenceDiagram
@@ -62,21 +64,23 @@ sequenceDiagram
 
     MQ->>C: LancamentoRegistrado (comercianteId, data D)
     C->>DB: BEGIN, evento processado, upsert (comerciante, D), progresso, COMMIT
-    C->>R: apaga cache de D e das datas posteriores do comerciante
-    C->>R: atualizadoAte do comerciante
-    API->>R: saldo:{comerciante}:{data}
+    C->>R: ultimoEventoAplicadoEm do comerciante
+    C->>R: INCR saldo:ver:{comerciante}
+    API->>R: GET saldo:ver:{comerciante} (versão v, lida antes do banco)
+    API->>R: GET saldo:{comerciante}:v{v}:{data}
     alt miss
         API->>DB: SUM(saldo) das linhas até a data
-        API->>R: grava com TTL
+        API->>R: SETEX saldo:{comerciante}:v{v}:{data}
     end
-    API->>R: atualizadoAte
+    API->>R: ultimoEventoAplicadoEm
 ```
 
 ## Trade-offs
 
 - **Custo da leitura sem cache.** A soma percorre as linhas do comerciante até a data, uma por dia com movimento. Cresce com o histórico, mas é uma varredura de índice sobre poucas linhas por comerciante e, com o cache de 60 s, só acontece a cada TTL por data. Não medimos esse custo com histórico longo; o teste de carga atual usa poucas linhas por comerciante.
-- **Janela de corrida no cache.** Um GET que leu o banco antes do commit pode gravar o valor antigo no cache depois da invalidação, e ele fica até o TTL. É o limite de consistência eventual já aceito (ADR-006) e o `atualizadoAte` deixa isso visível.
-- **Invalidar "da data em diante" apaga mais do que o mínimo** quando há muitas datas em cache, mas só do comerciante afetado.
+- **Invalidação grossa.** Qualquer evento avança a versão do comerciante inteiro, inclusive para datas anteriores à do lançamento, cujo valor não mudou. É mais invalidação do que o mínimo, e custa leituras ao banco que um `DEL` preciso evitaria. Em troca, a corrida de gravação atrasada deixa de existir e o código fica mais simples. O custo é por comerciante: o cache dos outros não é tocado. Se o histórico consultado de comerciantes muito ativos virar problema, a evolução é combinar a versão com snapshots (abaixo).
+- **Redis fora do ar na hora do evento.** Se o incremento da versão falhar (consumidor sem acesso ao Redis), entradas já em cache continuam sob a versão antiga e podem ser servidas até o TTL de 60 s. O consumidor registra o aviso e o processamento do evento não é desfeito. É o único caminho que ainda admite staleness, limitado ao TTL e restrito à falha do próprio Redis.
+- **Chaves antigas ocupam memória até o TTL.** Cada versão deixa chaves que expiram sozinhas em até 60 s; não há limpeza ativa.
 - **Linha de progresso por comerciante** é um ponto de escrita compartilhado entre os eventos do mesmo comerciante. Como o upsert do saldo já serializa eventos da mesma data, e o consumidor processa uma mensagem por vez por réplica, a contenção é aceitável neste volume.
 
 ## Alternativas
@@ -98,4 +102,4 @@ Quando o histórico por comerciante crescer a ponto de a soma incomodar, a evolu
 
 **Positivas:** isolamento entre comerciantes testado, acumulado correto inclusive com lançamento retroativo, dia vazio sem erro, consistência eventual explícita na resposta.
 
-**Negativas:** o contrato de resposta mudou (campos em camelCase, `saldo` virou `resultadoDia`, `saldoAcumulado` e `atualizadoAte` novos); a migration reescreve a chave primária de `saldo_diario`.
+**Negativas:** o contrato de resposta mudou (campos em camelCase, `saldo` virou `resultadoDia`, `saldoAcumulado` e `ultimoEventoAplicadoEm` novos); a migration reescreve a chave primária de `saldo_diario`.

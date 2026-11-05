@@ -24,7 +24,7 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 |---|---|
 | RF-06 | Consumir `LancamentoRegistrado` e atualizar a projeção de saldo diário com upsert atômico (`ON CONFLICT DO UPDATE SET saldo = saldo + delta`) |
 | RF-07 | Garantir idempotência: o mesmo `eventoId` nunca altera o saldo duas vezes, independente de quantas vezes o broker o entregue |
-| RF-08 | Retornar, para um comerciante e uma data: `totalCreditos`, `totalDebitos`, `resultadoDia`, `saldoAcumulado` (soma de todos os dias até a data) e `atualizadoAte` (instante do último lançamento aplicado). Dia sem movimento responde 200 com zeros no dia e o acumulado vigente |
+| RF-08 | Retornar, para um comerciante e uma data: `totalCreditos`, `totalDebitos`, `resultadoDia`, `saldoAcumulado` (soma de todos os dias até a data) e `ultimoEventoAplicadoEm` (o maior `createdAt` aplicado, que indica atraso mas não garante completude com eventos fora de ordem). Dia sem movimento responde 200 com zeros no dia e o acumulado vigente |
 | RF-10 | Consultar um intervalo de datas (`GET /consolidado?inicio=&fim=`), com um item por dia e limite de 92 dias |
 | RF-11 | Multi-comerciante: todos os dados, a chave de idempotência e o cache são separados por comerciante, que vem do claim `comerciante_id` do token e nunca do corpo da requisição |
 | RF-09 | Servir saldo do cache Redis com fallback transparente no banco (cliente não percebe o miss) |
@@ -39,7 +39,7 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 | RNF-02 | **Throughput** | Consolidado suporta 50 req/s no `GET /consolidado/{data}` | Cache Redis (hit <1ms) + fallback Postgres (1-5ms); rate limiter em 6.000 req/min (100 req/s) não bloqueia a 50 req/s |
 | RNF-03 | **Perda de requisições** | Menos de 5% sob 50 req/s | Rate limiter de 6.000 req/min por IP + cache absorvendo picos |
 | RNF-04 | **Latência** | p95 < 500ms no `GET /consolidado` | Cache hit típico <1ms; miss + Postgres ~5ms; SLO de produção sugerido: p95 < 100ms (cache hit) / p95 < 200ms (miss) |
-| RNF-05 | **Consistência eventual** | Saldo reflete todos os lançamentos em até ~5s após o registro; o `atualizadoAte` da resposta mostra até onde | Outbox relay a cada 1s + propagação AMQP <5ms + processamento do consumer |
+| RNF-05 | **Consistência eventual** | Saldo reflete todos os lançamentos em até ~5s após o registro; o `ultimoEventoAplicadoEm` da resposta indica o atraso aproximado, e o cache versionado impede servir valor anterior ao evento aplicado | Outbox relay a cada 1s + propagação AMQP <5ms + processamento do consumer |
 | RNF-06 | **Sem perda de eventos** | Nenhum `LancamentoRegistrado` pode ser perdido | Outbox: evento gravado na transação do lançamento; broker: fila durável; relay: só marca como publicado após a confirmação do broker (publisher confirms), retenta indefinidamente e pode rodar em várias réplicas sem duplicar (`FOR UPDATE SKIP LOCKED`) |
 | RNF-07 | **Idempotência** | Redelivery de evento nunca duplica o saldo | `eventos_processados` com `ON CONFLICT DO NOTHING` na mesma transação do upsert de saldo |
 | RNF-08 | **Segurança** | Endpoints de negócio exigem JWT; valores monetários nunca como float | JWT Bearer em todas as rotas protegidas; `NUMERIC(15,2)` no banco; `decimal.js` na aplicação |

@@ -1,17 +1,18 @@
 /**
  * Saldo por comerciante: isolamento, dia sem movimento, acumulado com lançamento retroativo,
- * atualizadoAte, evento antigo (1.0) e consulta por intervalo.
+ * ultimoEventoAplicadoEm, evento antigo (1.0) e consulta por intervalo.
  * Cada teste usa comerciantes próprios para não depender da ordem de execução.
  */
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import app from '../../src/app';
-import { chaveSaldo } from '../../src/cache/saldoCache';
+import { chaveSaldo, gravarSaldo, versaoAtual } from '../../src/cache/saldoCache';
+import { consultarDia } from '../../src/domain/saldoQueries';
 import { config } from '../../src/config';
 import { pool } from '../../src/db';
 import { getRedis } from '../../src/redis';
-import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEvento } from './helpers';
+import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEAguardar } from './helpers';
 
 const tokenDe = (c: string) => ({
   Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: c }, config.jwtSecret)}`,
@@ -30,11 +31,7 @@ describe('Saldo por comerciante', () => {
     createdAt?: string,
   ): Promise<void> {
     const e = montarEvento(uuidv4(), data, valor, tipo, { comercianteId, createdAt });
-    publicarEvento(infra.pubCh, e);
-    await aguardar(async () => {
-      const { rows } = await pool.query('SELECT 1 FROM eventos_processados WHERE evento_id = $1', [e.eventoId]);
-      return rows.length === 1;
-    }, 10_000);
+    await publicarEAguardar(infra.pubCh, e, comercianteId ?? 'padrao');
   }
 
   beforeAll(async () => {
@@ -64,8 +61,8 @@ describe('Saldo por comerciante', () => {
 
     // Evento de uma loja não invalida o cache da outra
     await aplicar('loja-a', '2030-01-10', '1.00');
-    expect(await getRedis().get(chaveSaldo('loja-b', '2030-01-10'))).not.toBeNull();
-    expect(await getRedis().get(chaveSaldo('loja-a', '2030-01-10'))).toBeNull();
+    expect((await consultar('loja-b', '2030-01-10')).body).toMatchObject({ source: 'cache', totalCreditos: '7.00' });
+    expect((await consultar('loja-a', '2030-01-10')).body).toMatchObject({ source: 'database', totalCreditos: '101.00' });
   }, 30_000);
 
   it('dia sem movimento devolve 200 com zeros, não 404', async () => {
@@ -79,7 +76,7 @@ describe('Saldo por comerciante', () => {
       totalDebitos: '0.00',
       resultadoDia: '0.00',
       saldoAcumulado: '0.00',
-      atualizadoAte: null,
+      ultimoEventoAplicadoEm: null,
     });
   });
 
@@ -108,32 +105,72 @@ describe('Saldo por comerciante', () => {
     expect((await consultar('loja-c', '2030-02-28')).body.saldoAcumulado).toBe('0.00');
   }, 30_000);
 
-  it('lançamento retroativo corrige o acumulado e invalida a data e as posteriores, não as anteriores', async () => {
+  it('lançamento retroativo corrige o acumulado das datas seguintes e nunca serve valor antigo', async () => {
     await aplicar('loja-d', '2030-04-10', '100.00');
     await aplicar('loja-d', '2030-04-12', '50.00');
 
-    // Põe em cache uma data anterior, a própria data e uma posterior
+    // Coloca em cache uma data anterior, a própria data e uma posterior
     for (const d of ['2030-04-05', '2030-04-10', '2030-04-12']) await consultar('loja-d', d);
-    for (const d of ['2030-04-05', '2030-04-10', '2030-04-12']) {
-      expect(await getRedis().get(chaveSaldo('loja-d', d))).not.toBeNull();
-    }
     expect((await consultar('loja-d', '2030-04-12')).body).toMatchObject({ source: 'cache', saldoAcumulado: '150.00' });
+    expect((await consultar('loja-d', '2030-04-10')).body.source).toBe('cache');
 
     // Lançamento retroativo no dia 10
     await aplicar('loja-d', '2030-04-10', '10.00');
 
-    expect(await getRedis().get(chaveSaldo('loja-d', '2030-04-10'))).toBeNull();
-    expect(await getRedis().get(chaveSaldo('loja-d', '2030-04-12'))).toBeNull();
-    expect(await getRedis().get(chaveSaldo('loja-d', '2030-04-05'))).not.toBeNull(); // anterior, intacta
-
+    // O cache do comerciante inteiro mudou de versão: tudo é relido do banco
     const d12 = await consultar('loja-d', '2030-04-12');
     expect(d12.body).toMatchObject({ source: 'database', resultadoDia: '50.00', saldoAcumulado: '160.00' });
     expect((await consultar('loja-d', '2030-04-10')).body).toMatchObject({
+      source: 'database',
       resultadoDia: '110.00',
       saldoAcumulado: '110.00',
     });
-    expect((await consultar('loja-d', '2030-04-05')).body).toMatchObject({ source: 'cache', saldoAcumulado: '0.00' });
+    expect((await consultar('loja-d', '2030-04-05')).body).toMatchObject({ source: 'database', saldoAcumulado: '0.00' });
   }, 30_000);
+
+  describe('corrida entre leitura lenta e evento', () => {
+    it('gravação atrasada de valor antigo cai numa versão velha e nunca é servida', async () => {
+      const dia = '2030-08-15';
+      await aplicar('loja-race', dia, '100.00');
+
+      // Leitor lento: lê a versão, consulta o banco (100.00) e ainda não gravou no cache
+      const versaoDoLeitor = await versaoAtual('loja-race');
+      const valorAntigo = await consultarDia(pool, 'loja-race', dia);
+      expect(valorAntigo.saldoAcumulado).toBe('100.00');
+
+      // Enquanto isso, um evento é aplicado e invalida o cache do comerciante
+      await aplicar('loja-race', dia, '50.00');
+      expect(await versaoAtual('loja-race')).not.toBe(versaoDoLeitor);
+
+      // A gravação atrasada do leitor lento acontece só agora, depois da invalidação
+      await gravarSaldo('loja-race', versaoDoLeitor, dia, valorAntigo);
+      expect(await getRedis().get(chaveSaldo('loja-race', versaoDoLeitor, dia))).not.toBeNull(); // está lá, mas...
+
+      // ...nenhuma leitura nova a enxerga
+      const res = await consultar('loja-race', dia);
+      expect(res.body).toMatchObject({ source: 'database', totalCreditos: '150.00', saldoAcumulado: '150.00' });
+      expect((await consultar('loja-race', dia)).body).toMatchObject({ source: 'cache', totalCreditos: '150.00' });
+    }, 30_000);
+
+    it('o mesmo cenário repetido com leituras concorrentes ao evento nunca devolve o total antigo depois dele', async () => {
+      const dia = '2030-09-01';
+      await aplicar('loja-race2', dia, '10.00');
+
+      const leituras: Array<{ totalCreditos: string }> = [];
+      let aplicado = false;
+      const leitor = (async () => {
+        while (!aplicado) leituras.push((await consultar('loja-race2', dia)).body);
+      })();
+      await aplicar('loja-race2', dia, '5.00');
+      aplicado = true;
+      await leitor;
+
+      // Depois que o evento foi processado, toda leitura nova vê o total novo
+      for (let i = 0; i < 5; i++) {
+        expect((await consultar('loja-race2', dia)).body.totalCreditos).toBe('15.00');
+      }
+    }, 30_000);
+  });
 
   it('evento 1.0, sem comercianteId, entra no comerciante padrão', async () => {
     await aplicar(null, '2030-05-05', '42.00');
@@ -142,14 +179,14 @@ describe('Saldo por comerciante', () => {
     expect(res.body).toMatchObject({ comercianteId: 'padrao', totalCreditos: '42.00' });
   });
 
-  it('atualizadoAte é o maior instante de lançamento aplicado, mesmo com eventos fora de ordem', async () => {
+  it('ultimoEventoAplicadoEm é o maior instante de lançamento aplicado, mesmo com eventos fora de ordem', async () => {
     const t1 = '2030-06-01T10:00:00.000Z';
     const t2 = '2030-06-01T12:30:00.000Z';
     await aplicar('loja-e', '2030-06-01', '1.00', 'credito', t2);
     await aplicar('loja-e', '2030-06-01', '1.00', 'credito', t1); // chegou depois, mas é mais antigo
 
     const res = await consultar('loja-e', '2030-06-01');
-    expect(res.body.atualizadoAte).toBe(t2);
+    expect(res.body.ultimoEventoAplicadoEm).toBe(t2);
   }, 20_000);
 
   describe('consulta por intervalo', () => {
@@ -165,7 +202,7 @@ describe('Saldo por comerciante', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ comercianteId: 'loja-f', inicio: '2030-06-30', fim: '2030-07-04' });
-      expect(res.body.atualizadoAte).not.toBeNull();
+      expect(res.body.ultimoEventoAplicadoEm).not.toBeNull();
       expect(
         res.body.dias.map((d: { data: string; resultadoDia: string; saldoAcumulado: string }) => [
           d.data,

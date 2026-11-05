@@ -1,16 +1,15 @@
 /**
  * Idempotência do consumidor e invalidação do cache com a chave no formato
- * saldo:{comerciante}:{YYYY-MM-DD}.
+ * saldo:{comerciante}:v{versao}:{YYYY-MM-DD}.
  */
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import app from '../../src/app';
-import { chaveSaldo } from '../../src/cache/saldoCache';
 import { config } from '../../src/config';
 import { pool } from '../../src/db';
 import { getRedis } from '../../src/redis';
-import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEvento } from './helpers';
+import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEAguardar, publicarEvento } from './helpers';
 
 const auth = { Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: 'padrao' }, config.jwtSecret)}` };
 
@@ -53,23 +52,19 @@ describe('Consumidor + cache', () => {
     const dia = '2031-01-10';
 
     const e1 = montarEvento(uuidv4(), dia, '100.00');
-    publicarEvento(infra.pubCh, e1);
-    await aguardar(() => processado(e1.eventoId), 10_000);
+    await publicarEAguardar(infra.pubCh, e1);
 
-    // 1º GET vem do banco e preenche o cache sob a chave saldo:{comerciante}:{data}
+    // 1º GET vem do banco e preenche o cache sob a chave saldo:{comerciante}:v{versao}:{data}
     const primeiro = await request(app).get(`/consolidado/${dia}`).set(auth);
     expect(primeiro.status).toBe(200);
     expect(primeiro.body).toMatchObject({ source: 'database', data: dia, totalCreditos: '100.00' });
-    expect(await getRedis().get(chaveSaldo('padrao', dia))).not.toBeNull();
 
     const segundo = await request(app).get(`/consolidado/${dia}`).set(auth);
     expect(segundo.body.source).toBe('cache');
 
-    // Novo lançamento no mesmo dia: o consumidor tem que apagar exatamente essa chave
+    // Novo lançamento no mesmo dia: a versão do cache avança e a leitura seguinte vai ao banco
     const e2 = montarEvento(uuidv4(), dia, '50.00');
-    publicarEvento(infra.pubCh, e2);
-    await aguardar(() => processado(e2.eventoId), 10_000);
-    expect(await getRedis().get(chaveSaldo('padrao', dia))).toBeNull();
+    await publicarEAguardar(infra.pubCh, e2);
 
     const terceiro = await request(app).get(`/consolidado/${dia}`).set(auth);
     expect(terceiro.body).toMatchObject({

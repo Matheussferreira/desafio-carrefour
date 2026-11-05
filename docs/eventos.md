@@ -11,7 +11,7 @@ Evento publicado pelo `lancamentos-relay` na exchange `lancamentos.events` (rout
 | `tipo` | `"LancamentoRegistrado"` | sim | Tipo do evento. Tipo desconhecido é reconhecido (ack) e ignorado |
 | `comercianteId` | string | **sim a partir da 1.1** | Dono do lançamento. 1 a 64 caracteres entre letras, números, hífen e sublinhado |
 | `correlationId` | string | não | Rastreamento entre serviços |
-| `createdAt` | ISO 8601 | não | Instante em que o lançamento foi registrado. Alimenta o `atualizadoAte` do consolidado |
+| `createdAt` | ISO 8601 | não | Instante em que o lançamento foi registrado. O consolidado expõe o maior `createdAt` aplicado como `ultimoEventoAplicadoEm`, que não garante completude quando os eventos chegam fora de ordem |
 | `data.lancamentoId` | UUID | sim | Lançamento de origem |
 | `data.valor` | string decimal | sim | Maior que zero, até 2 casas, nunca número JSON |
 | `data.tipo` | `"credito"` ou `"debito"` | sim | Define o sinal no resultado do dia |
