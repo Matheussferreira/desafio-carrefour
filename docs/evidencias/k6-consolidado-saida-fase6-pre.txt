@@ -1,0 +1,35 @@
+Saída do k6 completo (docker compose --profile loadtest run --rm k6) depois das correções de DLQ, /ready, paginação e imagens. Código de saída 0. O resumo em JSON desta execução é k6-consolidado-resumo.json.
+
+     ✓ HTTP 200
+     ✗ latência < 500ms
+      ↳  99% — ✓ 5950 / ✗ 52
+     checks.........................: 99.56% ✓ 11952     ✗ 52   
+     data_received..................: 16 MB  86 kB/s
+     data_sent......................: 16 MB  84 kB/s
+     dropped_iterations.............: 43     0.225999/s
+     http_req_blocked...............: avg=84.82µs  min=3.8µs     med=9.4µs    max=279.22ms p(90)=20.3µs   p(95)=39.1µs  
+     http_req_connecting............: avg=63.9µs   min=0s        med=0s       max=278.69ms p(90)=0s       p(95)=0s      
+     http_req_duration..............: avg=39.49ms  min=554.79µs  med=7.27ms   max=1.84s    p(90)=86.76ms  p(95)=208.2ms 
+       { expected_response:true }...: avg=39.49ms  min=554.79µs  med=7.27ms   max=1.84s    p(90)=86.76ms  p(95)=208.2ms 
+     ✓ { scenario:cache_hit }.......: avg=33.16ms  min=3.18ms    med=5.92ms   max=1.84s    p(90)=18.86ms  p(95)=75.34ms 
+     ✓ { scenario:cache_miss }......: avg=11.33ms  min=554.79µs  med=5.84ms   max=366.37ms p(90)=18.72ms  p(95)=37.33ms 
+     http_req_failed................: 0.00%  ✓ 0         ✗ 14035
+     ✓ { scenario:cache_hit }.......: 0.00%  ✓ 0         ✗ 3001 
+     ✓ { scenario:cache_miss }......: 0.00%  ✓ 0         ✗ 3001 
+     http_req_receiving.............: avg=260.26µs min=-450258ns med=184.54µs max=24.5ms   p(90)=321.46µs p(95)=493.25µs
+     http_req_sending...............: avg=115.82µs min=17µs      med=83.71µs  max=14.28ms  p(90)=162.23µs p(95)=239.94µs
+     http_req_tls_handshaking.......: avg=0s       min=0s        med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=39.11ms  min=262.16µs  med=6.92ms   max=1.84s    p(90)=86.28ms  p(95)=207.7ms 
+     http_reqs......................: 14035  73.764974/s
+     iteration_duration.............: avg=40.93ms  min=1.44ms    med=7.91ms   max=10.28s   p(90)=87.61ms  p(95)=209.73ms
+     iterations.....................: 13961  73.376046/s
+   ✓ non_ok_rate....................: 0.00%  ✓ 0         ✗ 6002 
+   ✓ pico_429_sem_retry_after.......: 0.00%  ✓ 0         ✗ 2448 
+     pico_respostas_200.............: 5511   28.964644/s
+     pico_respostas_429.............: 2448   12.866167/s
+   ✓ pico_respostas_outras..........: 0      0/s
+     vus............................: 1      min=0       max=60 
+     vus_max........................: 170    min=150     max=170
+cache_hit            ✓ [ 100% ] 000/050 VUs  1m0s  50.00 iters/s
+cache_miss           ✓ [ 100% ] 000/050 VUs  1m0s  50.00 iters/s
+pico_acima_do_limite ✓ [ 100% ] 000/120 VUs  40s   200.00 iters/s

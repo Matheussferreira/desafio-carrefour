@@ -64,10 +64,10 @@ describe('comerciante vem do token', () => {
     const b = await request(app).get('/lancamentos?data=2026-04-01').set(loja2);
     const semFiltro = await request(app).get('/lancamentos').set(loja2);
 
-    expect(a.body).toHaveLength(2);
-    expect(b.body).toHaveLength(1);
-    expect(b.body[0].valor).toBe('999.00');
-    expect(semFiltro.body).toHaveLength(1);
+    expect(a.body.itens).toHaveLength(2);
+    expect(b.body.itens).toHaveLength(1);
+    expect(b.body.itens[0].valor).toBe('999.00');
+    expect(semFiltro.body.itens).toHaveLength(1);
   });
 });
 

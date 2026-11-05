@@ -134,7 +134,8 @@ describe('contrato HTTP', () => {
 
     const get = await request(app).get('/lancamentos?data=2026-03-10').set(auth);
     expect(get.status).toBe(200);
-    expect(get.body[0].data).toBe('2026-03-10');
+    expect(get.body.itens[0].data).toBe('2026-03-10');
+    expect(get.body.proximoCursor).toBeNull();
   });
 
   it('reenvio idêntico devolve 200 e cabeçalho Idempotent-Replayed', async () => {

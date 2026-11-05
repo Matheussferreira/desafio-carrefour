@@ -41,7 +41,7 @@ Colocar os dois no mesmo processo os tornaria **cúmplices em falha**: um crash 
 | **Evento Processado** | Registro na tabela `eventos_processados` de um `eventoId` já aplicado ao saldo; garante idempotência do consumer |
 | **Cache de Saldo** | Representação em Redis do saldo de uma data; TTL de 60s; **não é fonte de verdade**, pode ser descartado a qualquer momento |
 | **Consistência Eventual** | O saldo reflete todos os lançamentos em até 5s após o registro; um GET durante esse intervalo pode retornar saldo desatualizado por no máximo o tempo de propagação do evento |
-| **DLQ** | `consolidado.lancamentos.dlq`, destino de mensagens que falharam após 1 tentativa inicial + 3 retries; requer intervenção manual para replay ou descarte |
+| **DLQ** | `consolidado.lancamentos.dlq`, destino de mensagens que nunca vão passar: JSON quebrado, contrato inválido (versão 2.x) ou erro permanente depois de 1 tentativa inicial + 3 retries. Falha de banco ou de conexão não manda para lá (a mensagem fica retida até o banco voltar). Requer intervenção para replay (`scripts/reprocessar-dlq`) ou descarte |
 
 ---
 
@@ -61,7 +61,7 @@ graph LR
 
     subgraph "BC: Consolidação Financeira :3002"
         direction TB
-        C1[Consumer AMQP\nRetry 1s→2s→4s, DLQ após 3]
+        C1[Consumer AMQP\nBanco fora: retém e espera\nErro permanente: 3 retries, DLQ]
         C2[Idempotência\neventos_processados ON CONFLICT]
         C3[Upsert Atômico\nsaldo = saldo + delta]
         C4[Avança a versão do cache\ndo comerciante no Redis]
@@ -80,7 +80,7 @@ graph LR
 | Domínio | Capacidade | Implementação | Criticidade |
 |---|---|---|---|
 | Lançamentos | Registrar lançamento | `POST /lancamentos` + transação ACID (lançamento + outbox) | Alta, nunca pode perder |
-| Lançamentos | Listar por data | `GET /lancamentos?data=` | Média |
+| Lançamentos | Listar por data | `GET /lancamentos?data=` com paginação por cursor | Média |
 | Lançamentos | Idempotência do cliente | `X-Idempotency-Key` → `ON CONFLICT` no banco dentro da transação | Alta, evita duplicatas sob retry HTTP |
 | Lançamentos | Publicação confiável de eventos | Outbox Pattern, evento gravado na mesma tx do lançamento | Alta, zero perda mesmo sob falha do broker |
 | Consolidado | Calcular saldo diário | Consumer + `ON CONFLICT DO UPDATE SET saldo = saldo_diario.saldo + delta` | Alta, invariante financeira |

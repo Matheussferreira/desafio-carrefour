@@ -11,12 +11,8 @@ São correções e provas que o próprio projeto já identificou como lacuna. O 
 | Item | Por que | Gatilho | Esforço |
 |---|---|---|---|
 | Terraform para a AWS | Hoje não existe IaC da AWS no repositório. Os documentos de [custos](custos.md), [dimensionamento](dimensionamento.md) e [recuperação de desastres](disaster-recovery.md) descrevem um ambiente que ninguém consegue criar de forma reproduzível | Antes do primeiro ambiente numa conta AWS | G |
-| Health check do balanceador em `/health` e `/ready` do consolidado sem o Redis | O `/ready` do consolidado faz `PING` no Redis e fica 503 quando ele cai, o que, usado como health check do ALB, retiraria todas as tarefas num problema que o código sabe contornar (leitura cai para o banco). Ver [arquitetura.md](arquitetura.md) | Antes de configurar o ALB | P |
-| Teste de falha do Redis | O fallback para o banco não tem teste automatizado ([testes.md](testes.md)) | Junto com o item anterior | P |
 | Validação de custos e capacidade na AWS | Todos os números de [custos.md](custos.md) e [dimensionamento.md](dimensionamento.md) são estimativas ou hipóteses | Antes de qualquer compromisso de orçamento | M |
-| Reprocessamento da DLQ | Banco do consolidado fora por mais de cerca de 7 s manda eventos para a DLQ e hoje o reprocesso é manual ([disaster-recovery.md](disaster-recovery.md)) | O primeiro incidente com mensagens na DLQ, ou antes de produção | M |
 | Rate limit distribuído e por cliente | O limite é em memória, por instância e por IP; atrás de um balanceador todos os clientes compartilham um IP ([seguranca.md](seguranca.md)) | Mais de uma réplica por serviço, o que é o mínimo de produção | M |
-| Endurecimento da imagem | O Dockerfile roda como root, instala dependências de desenvolvimento e não usa multi-stage | Antes de publicar a imagem no ECR de produção | P |
 | Rodar o CI no GitHub | O fluxo foi escrito e só teve a sintaxe validada | Quando o repositório for publicado | P |
 
 ## Prioridade 1: primeiros meses de operação
@@ -24,11 +20,10 @@ São correções e provas que o próprio projeto já identificou como lacuna. O 
 | Item | O que resolve | Gatilho | Esforço |
 |---|---|---|---|
 | Retenção do outbox e de `eventos_processados` | Ambas crescem sem limite (cerca de 0,8 KB por evento só no outbox, medido). Sem rotina, o disco de 50 GB dura cerca de um ano a 100 mil lançamentos por dia (extrapolação) | Ocupação do disco acima de 50% ou o outbox passar de um prazo acordado | M |
-| Paginação em `GET /lancamentos` | Hoje devolve até 100 linhas fixas | O primeiro cliente com mais de 100 lançamentos no dia | P |
 | Advisory lock nas migrations | Duas réplicas subindo juntas podem colidir ao registrar a migration | Quando houver mais de uma réplica, junto com o item de rate limit | P |
-| Retentativa sem bloquear a fila | O backoff dorme dentro do consumidor com `prefetch=1`; uma mensagem ruim segura a fila por até 7 s | Observar `consolidado_consumer_retries_total` frequente, ou lag alto sem causa de carga | M |
+| Retentativa de erro permanente sem bloquear a fila | Falha de banco já não bloqueia nem vai para a DLQ ([ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)), mas um erro permanente ainda segura o consumidor por até 7 s (3 retentativas com `prefetch=1`) antes da DLQ | Observar `consolidado_consumer_retries_total` frequente, ou lag alto sem causa de carga | M |
+| Descartar o cache do consolidado quando o Redis reconecta | Eventos aplicados com o Redis fora não avançam a versão do cache; uma entrada antiga que sobreviva à parada pode ser servida até o TTL de 60 s (o cenário C do teste de resiliência mede essa janela) | Qualquer incidente real de Redis, ou se o RNF-05 passar a exigir menos de 60 s também depois de uma queda do cache | P |
 | Alertas (Prometheus Alertmanager ou CloudWatch) | Hoje há métricas e dashboard, sem alerta | Antes de produção; é pré-requisito para o RNF-05 ser acompanhado | P |
-| OpenAPI publicada | O contrato HTTP existe no código e na documentação, mas não como especificação | O primeiro integrador externo | P |
 | Teste para o desligamento gracioso (RNF-10) | Cobertura parcial hoje ([testes.md](testes.md)) | Antes de produção, junto com o ECS | P |
 | Anonimização ou política para a `descricao` | O campo livre pode conter dado pessoal ([seguranca.md](seguranca.md)) | Parecer do compliance sobre LGPD | M |
 
@@ -37,6 +32,7 @@ São correções e provas que o próprio projeto já identificou como lacuna. O 
 | Item | O que resolve | Gatilho | Esforço |
 |---|---|---|---|
 | **Snapshots de saldo** | O saldo acumulado hoje é a soma das linhas de `saldo_diario` até a data (0,24 a 1,17 ms em 3 anos de histórico, [ADR-009](adrs/ADR-009-saldo-acumulado-e-multi-comerciante.md)). Com snapshots, a soma parte do último snapshot e não do início. Também encurta a reconstrução do consolidado depois de um desastre | Consulta de acumulado com p95 acima de 50 ms (heurística) em cache frio, ou comerciantes com histórico bem acima de 3 anos, ou replay completo do outbox acima do RTO do consolidado | M |
+| Fila de retentativa com TTL para erro transitório | Hoje a mensagem fica retida no consumidor até o banco voltar. Uma fila de espera com TTL libera o consumidor e conta tentativas por cabeçalho ([ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)) | Mais de uma réplica do consumidor, ou quedas de banco longas o bastante para que reter a mensagem atrapalhe | M |
 | **CDC com Debezium no lugar do polling** | O relay consulta o outbox a cada 1 s. O CDC lê o WAL do PostgreSQL: latência menor e nenhum `SELECT` periódico | A latência do polling deixar de caber no RNF-05, ou o `SELECT` do relay ser relevante na CPU do banco, ou surgirem vários consumidores do evento. O `FOR UPDATE SKIP LOCKED` atual cobre o volume projetado | G |
 | Pact (testes de contrato dirigidos pelo consumidor) | Hoje o contrato do evento é testado por `evento-versoes.test.ts` dentro do consolidado, que é o consumidor. Com outro time ou outro consumidor, o produtor precisa saber o que quebra | Um segundo consumidor do evento, ou os dois serviços passarem para equipes diferentes | M |
 | Estorno de lançamento | Lançamentos são imutáveis e não há como corrigir um erro. O desenho natural é um evento `LancamentoEstornado` que compensa o original (o consumidor atual ignora tipos desconhecidos, então a introdução é compatível), com trilha de auditoria | O primeiro pedido de correção de lançamento, ou exigência de imutabilidade e auditoria do compliance | M |

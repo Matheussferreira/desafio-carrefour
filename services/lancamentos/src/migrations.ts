@@ -66,6 +66,14 @@ const migrations = [
       ALTER TABLE outbox ADD COLUMN IF NOT EXISTS traceparent TEXT;
     `,
   },
+  {
+    // Paginação por cursor de GET /lancamentos: ordem (comerciante, mais recente primeiro, id como desempate).
+    name: '005_indice_listagem',
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_lancamentos_comerciante_criado
+        ON lancamentos (comerciante_id, created_at DESC, id DESC);
+    `,
+  },
 ];
 
 /** Aplica as migrations pendentes. O parâmetro `ate` (nome da migration) existe para testar upgrades. */

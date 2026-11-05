@@ -78,5 +78,10 @@ jobs:
           docker compose config -q
           docker compose --profile observability --profile loadtest config -q
           docker compose -f docker-compose.integration.yml config -q
+      - name: Compose do profile de testes e sintaxe do script de reprocessamento da DLQ
+        run: |
+          docker compose --profile test config -q
+          node --check scripts/reprocessar-dlq.js
+          bash -n scripts/reprocessar-dlq.sh
       - name: Dashboard do Grafana é um JSON válido
         run: node -e "JSON.parse(require('fs').readFileSync('observability/grafana/provisioning/dashboards/caixa-flow.json','utf8'))"

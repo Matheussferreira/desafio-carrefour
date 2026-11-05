@@ -10,9 +10,11 @@ import {
   eventsProcessedTotal,
   consumerRetriesTotal,
   consumerDlqTotal,
+  consumerTransientTotal,
   eventoLagSegundos,
 } from '../metrics';
 import { withRetry } from '../utils/retry';
+import { erroTransitorio } from '../utils/erroTransitorio';
 import { calcularDelta, EventoLancamentoRegistrado, interpretarMensagem } from '../domain/evento';
 
 const MAX_RETRIES = 3;
@@ -94,6 +96,48 @@ export async function processEvent(
   return 'processed';
 }
 
+// Espera entre tentativas enquanto o banco está fora: 1 s, 2 s, 4 s, 8 s e depois 15 s.
+const ESPERA_TRANSITORIA_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const;
+
+/** Dorme em fatias curtas para o desligamento do processo não ficar preso numa espera longa. */
+async function dormirAteDesligar(ms: number): Promise<void> {
+  const fim = Date.now() + ms;
+  while (!shuttingDown && Date.now() < fim) {
+    await new Promise<void>(r => setTimeout(r, Math.min(100, fim - Date.now())));
+  }
+}
+
+/**
+ * Aplica o evento e, se o banco estiver fora ou a conexão cair, mantém a mensagem retida (sem ack e
+ * sem nack) e tenta de novo com espera crescente até o banco voltar. Com prefetch 1 isso pausa o
+ * consumo, e o evento, que é válido, nunca vai para a DLQ por causa de uma falha de infraestrutura.
+ * Erro que não é transitório é relançado para o withRetry e, esgotado, vai para a DLQ.
+ * Retorna 'interrompido' se o processo começou a desligar durante a espera.
+ */
+async function aplicarEsperandoBanco(
+  evento: EventoLancamentoRegistrado,
+  log: typeof logger,
+): Promise<'processed' | 'skipped' | 'interrompido'> {
+  let tentativa = 0;
+  for (;;) {
+    try {
+      return await processEvent(evento);
+    } catch (err) {
+      if (!erroTransitorio(err)) throw err;
+      if (shuttingDown) return 'interrompido';
+      consumerTransientTotal.inc();
+      const esperaMs = ESPERA_TRANSITORIA_MS[Math.min(tentativa, ESPERA_TRANSITORIA_MS.length - 1)];
+      tentativa++;
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err), tentativa, esperaMs },
+        'Banco indisponível, mensagem retida até ele voltar',
+      );
+      await dormirAteDesligar(esperaMs);
+      if (shuttingDown) return 'interrompido';
+    }
+  }
+}
+
 // Confirmação pode falhar se o canal caiu no meio do processamento. Sem problema:
 // o broker reentrega e a idempotência descarta a repetição.
 function seguro(acao: () => void): void {
@@ -149,7 +193,7 @@ async function tratarMensagem(ch: Channel, msg: ConsumeMessage): Promise<void> {
     const log = logger.child({ eventoId: evento.eventoId, correlationId: evento.correlationId });
 
     const result = await withRetry(
-      () => processEvent(evento),
+      () => aplicarEsperandoBanco(evento, log),
       MAX_RETRIES,
       RETRY_DELAYS_MS,
       (err, attempt) => {
@@ -158,7 +202,10 @@ async function tratarMensagem(ch: Channel, msg: ConsumeMessage): Promise<void> {
       },
     );
 
-    if (result.ok) {
+    if (result.ok && result.value === 'interrompido') {
+      // O processo está desligando: devolve a mensagem para a fila, sem contar como falha
+      seguro(() => ch.nack(msg, false, true));
+    } else if (result.ok) {
       eventsProcessedTotal.inc({ tipo: 'LancamentoRegistrado', status: result.value });
       if (result.value === 'processed' && evento.createdAt) {
         eventoLagSegundos.observe(Math.max(0, (Date.now() - Date.parse(evento.createdAt)) / 1000));

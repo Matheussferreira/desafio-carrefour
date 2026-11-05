@@ -188,8 +188,14 @@ Invoke-WebRequest -UseBasicParsing -Method Post http://localhost:3001/lancamento
   -ContentType 'application/json' `
   -Body '{"valor":"999.00","tipo":"credito","data":"2026-06-15"}'
 
-# Listar lançamentos do dia
-Invoke-RestMethod "http://localhost:3001/lancamentos?data=2026-06-15" -Headers $H
+# Listar lançamentos do dia, do mais recente ao mais antigo (até 50 por página; limite vai de 1 a 100)
+$pagina = Invoke-RestMethod "http://localhost:3001/lancamentos?data=2026-06-15&limite=50" -Headers $H
+$pagina.itens
+
+# Próxima página: use proximoCursor; ele é null na última
+if ($pagina.proximoCursor) {
+  Invoke-RestMethod "http://localhost:3001/lancamentos?data=2026-06-15&cursor=$($pagina.proximoCursor)" -Headers $H
+}
 ```
 
 ### Consolidado
@@ -240,15 +246,15 @@ o valor antigo depois da invalidação. Decisões e trade-offs no ADR-009.
 
 ### Unitários
 
-Rodam dentro do container, sem infra externa. Todos importam o código de produção
+Rodam em contêineres feitos do estágio `test` do Dockerfile (a imagem de produção não leva testes), sem infra externa. Todos importam o código de produção
 (validação, hash de idempotência, interpretação de eventos, cálculo de delta, backoff, retry,
 contrato HTTP dos erros, segurança do JWT, métricas HTTP e propagação de trace).
 O lint roda com `npm run lint` dentro de cada serviço, e o CI executa lint, tipos, testes e build das imagens.
 A estratégia completa, ligada aos requisitos não funcionais, está em [docs/testes.md](docs/testes.md).
 
 ```powershell
-docker compose run --rm lancamentos npm test
-docker compose run --rm consolidado npm test
+docker compose --profile test run --rm lancamentos-test
+docker compose --profile test run --rm consolidado-test
 ```
 
 ### Integração, com Postgres, RabbitMQ e Redis reais
@@ -274,7 +280,9 @@ O que é coberto:
 - Relay: nada é marcado como publicado sem confirmação do broker, nem quando a mensagem volta por falta de rota
 - 3 relays concorrentes publicando 200 eventos sem duplicar nem perder
 - Reconexão ao RabbitMQ de verdade, derrubando as conexões no broker
-- Consumidor: retry com backoff, DLQ, evento malformado direto para a DLQ, idempotência e invalidação do cache
+- Consumidor: retry com backoff e DLQ para erro permanente; evento malformado ou de versão 2.x direto para a DLQ; banco fora (erro simulado e banco bloqueado de verdade) sem DLQ e com o saldo convergindo na volta; idempotência e invalidação do cache
+- Redis fora: `/ready` segue 200, o GET vem do banco e o evento recebido sem Redis é aplicado
+- Paginação por cursor de `GET /lancamentos` e respostas reais conferidas contra o OpenAPI de cada serviço
 - O `traceparent` da requisição é gravado no outbox e sai no cabeçalho da mensagem publicada
 
 ### Resiliência, com a stack inteira no ar
@@ -286,7 +294,26 @@ docker compose up -d --build --wait
 
 No Linux, macOS ou Git Bash: `bash tests/resiliencia/resiliencia.sh`.
 
-Cria 30 lançamentos com o consolidado parado e exige 201 em todos, sobe o consolidado e espera o saldo convergir. Repete derrubando o RabbitMQ: os lançamentos seguem aceitos, o outbox acumula e, na volta do broker, drena. Sai com código diferente de zero se qualquer verificação falhar e salva a saída em `docs/evidencias/`.
+Cinco cenários contra a stack real, cada um com 30 lançamentos:
+
+- **A, consolidado parado:** todos os lançamentos são aceitos (201), a fila retém os eventos e o saldo converge na volta.
+- **B, RabbitMQ parado:** os lançamentos seguem aceitos, o outbox acumula e, na volta do broker, drena.
+- **C, Redis parado:** o consolidado segue pronto (`/ready` 200), o GET devolve 200 vindo do banco, os eventos continuam sendo aplicados e a defasagem do cache na volta é medida.
+- **D, banco do consolidado fora por 30 s:** lançamentos 201, a fila retém as mensagens, a DLQ não recebe nenhuma e o saldo converge quando o banco volta.
+- **E, reprocessar a DLQ:** a mensagem válida volta à fila e é aplicada; a quebrada volta para a DLQ.
+
+Sai com código diferente de zero se qualquer verificação falhar e salva a saída em `docs/evidencias/`.
+
+### Reprocessar a DLQ
+
+A DLQ (`consolidado.lancamentos.dlq`) recebe só mensagem inválida ou com erro permanente; uma queda do banco não a enche. Depois de corrigir a causa:
+
+```powershell
+.\scripts\reprocessar-dlq.ps1 -Simular   # mostra o que seria devolvido
+.\scripts\reprocessar-dlq.ps1            # devolve as mensagens à fila principal
+```
+
+No Linux, macOS ou Git Bash: `bash scripts/reprocessar-dlq.sh [--simular]`. Precisa de Node 20 no host. Detalhes e o racional em [ADR-011](docs/adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md).
 
 ---
 
@@ -382,7 +409,8 @@ O tracing vem desligado por padrão porque acrescenta CPU por requisição (`doc
 ## Documentação
 
 - `docs/arquitetura.md`: C4 (contexto, containers e componentes) em Mermaid e tabela de cenários de falha
-- `docs/adrs/`: 10 ADRs cobrindo as decisões de projeto
+- `docs/adrs/`: 11 ADRs cobrindo as decisões de projeto
+- `services/lancamentos/openapi.yaml` e `services/consolidado/openapi.yaml`: especificação OpenAPI 3 de cada API, conferida por teste contra as rotas e as respostas reais
 - `docs/eventos.md`: contrato do evento e política de versionamento
 - `docs/requisitos.md`: requisitos funcionais e não funcionais
 - `docs/testes.md`: pirâmide de testes ligada aos requisitos não funcionais

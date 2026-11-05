@@ -15,7 +15,7 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 | RF-01 | Registrar um lançamento (débito ou crédito) com valor, tipo, descrição opcional e data de competência |
 | RF-02 | Validar que `valor` é uma string decimal positiva com até 2 casas e no máximo 999999999.99, que `tipo` é `credito` ou `debito`, que `data` é uma data real no formato YYYY-MM-DD e que `descricao`, se enviada, tem até 500 caracteres. Qualquer violação é 400 com `application/problem+json` |
 | RF-03 | Suportar chave de idempotência via header `X-Idempotency-Key` (opcional; sem ela, cada request cria um lançamento). Mesma chave com o mesmo corpo devolve o lançamento original (200); com corpo diferente devolve 409 |
-| RF-04 | Listar lançamentos com filtro opcional por data de competência |
+| RF-04 | Listar lançamentos do comerciante, do mais recente ao mais antigo, com filtro opcional por data de competência e paginação por cursor (`limite` de 1 a 100, padrão 50; `proximoCursor` na resposta, `null` na última página) |
 | RF-05 | Publicar o evento `LancamentoRegistrado` no broker de forma confiável: o evento é gravado na mesma transação do lançamento (Outbox Pattern), garantindo zero perda mesmo que o broker esteja temporariamente indisponível |
 
 ### Serviço de Consolidado

@@ -100,7 +100,7 @@ WHERE status = 'publicado' AND created_at >= '<T menos uma margem de segurança>
 ### Fase 5: validação e comunicação
 
 16. Conferir um comerciante por amostragem: a soma dos lançamentos do `lancamentos_db` do dia contra `GET /consolidado/{data}`.
-17. Confirmar `consolidado_consumer_dlq_total` estável. Mensagens na DLQ (`consolidado.lancamentos.dlq`) pedem tratamento manual, ver "Reprocessar a DLQ" abaixo.
+17. Confirmar `consolidado_consumer_dlq_total` estável. Falha de banco ou de conexão durante a recuperação **não** manda mensagens para a DLQ (elas ficam retidas até o banco voltar, [ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)). O que estiver na DLQ (`consolidado.lancamentos.dlq`) é dado inválido e pede tratamento manual, ver "Reprocessar a DLQ" abaixo.
 18. Comunicar as áreas de negócio e os integradores com o ponto de corte do RPO, para que reenviem lançamentos feitos depois dele.
 
 ### Fase 6: failback
@@ -111,18 +111,28 @@ WHERE status = 'publicado' AND created_at >= '<T menos uma margem de segurança>
 
 ## Reprocessar a DLQ
 
-Se o banco do consolidado ficar fora por mais que os 7 segundos de retentativa do consumidor (1 s, 2 s e 4 s), as mensagens vão para `consolidado.lancamentos.dlq` (comportamento coberto por `dlq.test.ts`). Hoje **não há ferramenta de reprocessamento**. O caminho manual é mover as mensagens da DLQ de volta para a exchange `lancamentos.events` com o routing key `lancamento.registrado`, pela interface de gerenciamento do RabbitMQ (Shovel) ou por `rabbitmqadmin`. Reentregar é seguro pela idempotência. Uma ferramenta própria está em [evolucoes.md](evolucoes.md).
+A DLQ `consolidado.lancamentos.dlq` recebe só mensagem que não vai passar: JSON quebrado, contrato inválido (por exemplo versão 2.x) ou erro permanente de processamento. Uma queda do banco, mesmo longa, **não** a enche: a mensagem fica retida e é aplicada na volta.
+
+Para devolver as mensagens da DLQ à fila principal depois de corrigir a causa:
+
+```powershell
+.\scripts\reprocessar-dlq.ps1 -Simular   # mostra o que seria devolvido, sem alterar nada
+.\scripts\reprocessar-dlq.ps1            # devolve tudo
+.\scripts\reprocessar-dlq.ps1 -Limite 10 # devolve só 10
+```
+
+No Linux, macOS ou Git Bash: `bash scripts/reprocessar-dlq.sh [--simular] [--limite N]`. O script usa a API de gerenciamento do RabbitMQ (porta 15672) e precisa do Node 20. Cada mensagem é publicada na fila principal antes de a cópia da DLQ ser descartada; se a publicação não for confirmada, ela volta para a DLQ e o script para. Reentregar é seguro pela idempotência. Uma mensagem realmente inválida volta para a DLQ quando o consumidor a recusar de novo, e o script só processa as mensagens que a DLQ tinha ao começar, então não entra em laço. As estatísticas de fila do RabbitMQ atualizam a cada cerca de 5 segundos, então uma mensagem recém-chegada pode demorar para aparecer na contagem.
 
 ## Política de teste
 
 | Teste | Frequência proposta | O que valida |
 |---|---|---|
-| Resiliência de componente (`tests/resiliencia`) | A cada mudança relevante e antes de release | Lançamentos segue aceitando com o consolidado e com o RabbitMQ parados; o saldo converge na volta |
+| Resiliência de componente (`tests/resiliencia`) | A cada mudança relevante e antes de release | Lançamentos segue aceitando com o consolidado, o RabbitMQ e o banco do consolidado parados; o consolidado segue pronto sem o Redis; o saldo converge na volta; o reprocessamento da DLQ funciona |
 | Restauração de backup do RDS num ambiente isolado | Trimestral | Que o backup restaura e quanto tempo leva |
 | Gameday de failover regional | Semestral | O roteiro acima, ponta a ponta, medindo RTO e RPO reais |
 | Replay completo do outbox num consolidado vazio | Semestral, ou quando o outbox dobrar | Tempo de reconstrução |
 
 ## O que está provado e o que não está
 
-- **Provado por teste automatizado** (ver [testes.md](testes.md)): lançamentos 201 com o consolidado parado e com o RabbitMQ parado, drenagem do outbox na volta, convergência do saldo, idempotência de reentrega, reconexão do consumidor, DLQ com banco indisponível.
+- **Provado por teste automatizado** (ver [testes.md](testes.md)): lançamentos 201 com o consolidado parado e com o RabbitMQ parado, drenagem do outbox na volta, convergência do saldo, idempotência de reentrega, reconexão do consumidor, 30 s de banco do consolidado fora sem nada na DLQ, consolidado pronto sem o Redis e reprocessamento da DLQ.
 - **Não provado:** failover de RDS, promoção de réplica entre regiões, redirecionamento de DNS, replay completo do outbox em volume, restauração de backup. São metas de projeto até o primeiro exercício.

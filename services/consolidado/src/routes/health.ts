@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db';
-import { getRedis } from '../redis';
 import { broker } from '../rabbitmq';
 import { consumerAtivo } from '../consumer/lancamentosConsumer';
 
@@ -10,11 +9,11 @@ router.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'consolidado' });
 });
 
-// Fica vermelho quando o banco, o Redis ou a conexão com o RabbitMQ caem
+// Fica vermelho quando o banco ou a conexão com o RabbitMQ caem. O Redis é só cache e fica de fora
+// de propósito: sem ele a leitura cai para o banco, e tirar o serviço do balanceador pioraria a queda.
 router.get('/ready', async (_req: Request, res: Response) => {
   try {
     await pool.query('SELECT 1');
-    await getRedis().ping();
     if (!broker.isConnected()) throw new Error('RabbitMQ desconectado');
     if (!consumerAtivo()) throw new Error('consumidor inativo');
     res.json({ status: 'ready' });

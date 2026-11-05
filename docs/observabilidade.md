@@ -30,7 +30,8 @@ As métricas HTTP (`*_http_requests_total` e `*_http_request_duration_seconds`) 
 | `consolidado_http_request_duration_seconds` | Histogram | `method, route, status` | Latência das requisições; buckets: 5ms a 2.5s |
 | `consolidado_events_processed_total` | Counter | `tipo, status` | Eventos processados; `status`: `processed`, `skipped`, `dlq`, `invalid` |
 | `consolidado_consumer_retries_total` | Counter | n/a | Cada vez que `withRetry` chama o callback `onRetry`; uma mensagem que esgota os retries contribui **3** para este contador (não 4, a última tentativa falha sem callback) |
-| `consolidado_consumer_dlq_total` | Counter | n/a | Mensagens enviadas à DLQ após esgotar retries; deve ser próximo de zero em operação normal |
+| `consolidado_consumer_dlq_total` | Counter | n/a | Mensagens enviadas à DLQ: evento inválido, de versão incompatível ou com erro permanente depois de esgotar os retries. Falha de banco **não** entra aqui; deve ser zero em operação normal |
+| `consolidado_consumer_transient_errors_total` | Counter | n/a | Falhas transitórias (banco ou conexão fora) em que a mensagem ficou retida esperando, sem ir para a DLQ. Cresce enquanto o banco do consolidado estiver fora ([ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)) |
 | `consolidado_evento_lag_seconds` | Histogram | n/a | Lag: tempo entre a criação do evento (`createdAt`) e a aplicação ao saldo. Buckets de 50 ms a 300 s |
 | `consolidado_rabbitmq_connected` | Gauge | n/a | 1 quando o consumidor está conectado ao RabbitMQ |
 | Métricas Node.js default | n/a | n/a | Heap, GC, CPU, event loop lag |
@@ -63,7 +64,7 @@ docker compose logs consolidado | grep "7f3e9c1a"
 |---|---|---|
 | `GET /health` | Liveness | Processo vivo; retorna `{"status":"ok"}` incondicionalmente |
 | `GET /ready`, lancamentos | Readiness | `SELECT 1` no banco. A API não depende do broker, que é assunto do `lancamentos-relay` |
-| `GET /ready`, consolidado | Readiness | `SELECT 1` no banco + `PING` no Redis + canal RabbitMQ |
+| `GET /ready`, consolidado | Readiness | `SELECT 1` no banco + conexão com o RabbitMQ + consumidor ativo. O Redis fica de fora de propósito: é cache, e tirar o serviço do balanceador por causa dele pioraria a queda |
 
 O Docker Compose usa `/ready` como healthcheck de `lancamentos`, `lancamentos-relay` e `consolidado`, e `docker compose up --wait` só retorna quando os três estão saudáveis. O `/ready` do consolidado e do relay fica 503 quando a conexão com o RabbitMQ cai; o da API de lançamentos depende apenas do banco.
 
@@ -150,7 +151,8 @@ docker compose --profile observability up -d --wait
 | Taxa de erro `POST /lancamentos` | < 0.1% | > 1% por 5min |
 | Disponibilidade `GET /consolidado` | > 99.5% em 30 dias | < 99% em janela de 1h |
 | Latência `GET /consolidado` p95 | < 100ms (cache quente) / < 200ms (cache frio) | > 200ms por 5min |
-| Taxa de mensagens na DLQ | < 0.01% do total | Qualquer mensagem na DLQ → alerta imediato |
+| Taxa de mensagens na DLQ | < 0.01% do total | Qualquer mensagem na DLQ → alerta imediato (é dado inválido ou erro permanente; falha de banco não chega lá) |
+| Mensagens retidas por falha transitória | 0 em operação normal | `rate(consolidado_consumer_transient_errors_total[5m]) > 0` por mais de 5 min → banco do consolidado fora ou instável |
 | Lag de consistência (lançamento → saldo) | < 5s em p99 | > 30s → investigar relay ou broker |
 
 Alertas baseados em `consolidado_consumer_dlq_total` e `consolidado_consumer_retries_total` são especialmente importantes: um spike de retries indica problema transiente (ex: banco sobrecarregado); mensagens na DLQ indicam problema persistente (ex: payload inválido ou bug no processamento) que requer intervenção manual.

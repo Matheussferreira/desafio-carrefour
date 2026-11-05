@@ -6,7 +6,13 @@ import { logger } from './logger';
 // processo, que serializa como timestamp e desloca o dia conforme o TZ.
 types.setTypeParser(1082, valor => valor);
 
-export const pool = new Pool({ connectionString: config.databaseUrl });
+// connectionTimeoutMillis evita que uma tentativa de conexão a um banco inalcançável fique pendurada.
+export const pool = new Pool({ connectionString: config.databaseUrl, connectionTimeoutMillis: 5000 });
+
+// Conexão ociosa derrubada pelo banco emite 'error' no pool; sem este tratador o processo cairia.
+pool.on('error', err => {
+  logger.warn({ err: err.message }, 'Conexão ociosa do pool encerrada');
+});
 
 export async function waitForDb(maxAttempts = 15, delayMs = 3000): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

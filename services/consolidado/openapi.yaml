@@ -1,0 +1,285 @@
+openapi: 3.0.3
+info:
+  title: Serviço de Consolidado
+  version: 1.1.0
+  description: |
+    Saldo diário consolidado por comerciante, uma projeção dos eventos `LancamentoRegistrado`.
+    A consistência é eventual (`ultimoEventoAplicadoEm` indica até onde a projeção está atualizada).
+    O comerciante vem do claim `comerciante_id` do token. Erros no formato RFC 7807.
+
+    Este arquivo é conferido contra as rotas do Express por `tests/unit/openapi.test.ts`
+    e contra respostas reais por `tests/integration/contrato-openapi.test.ts`.
+servers:
+  - url: http://localhost:3002
+    description: Ambiente local (docker compose)
+tags:
+  - name: Consolidado
+  - name: Operação
+paths:
+  /consolidado/{data}:
+    get:
+      tags: [Consolidado]
+      summary: Saldo de um dia e acumulado até ele
+      description: |
+        Dia sem movimento responde 200 com zeros no dia e o acumulado vigente. O campo `source`
+        indica se veio do cache ou do banco; sem o Redis a resposta vem sempre do banco.
+      operationId: consultarDia
+      security:
+        - bearer: [consolidado.read]
+      parameters:
+        - name: data
+          in: path
+          required: true
+          description: Data de competência (YYYY-MM-DD, data real do calendário).
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Saldo do dia.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaldoDoDia'
+        '400':
+          $ref: '#/components/responses/ErroDeValidacao'
+        '401':
+          $ref: '#/components/responses/NaoAutenticado'
+        '403':
+          $ref: '#/components/responses/Proibido'
+        '429':
+          $ref: '#/components/responses/LimiteExcedido'
+        '503':
+          $ref: '#/components/responses/ProvedorIndisponivel'
+  /consolidado:
+    get:
+      tags: [Consolidado]
+      summary: Saldo de um intervalo de datas
+      description: Um item por dia do intervalo, inclusive dias sem movimento, com o acumulado correndo. Máximo de 92 dias.
+      operationId: consultarIntervalo
+      security:
+        - bearer: [consolidado.read]
+      parameters:
+        - name: inicio
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: fim
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Saldos do intervalo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaldoDoIntervalo'
+        '400':
+          $ref: '#/components/responses/ErroDeValidacao'
+        '401':
+          $ref: '#/components/responses/NaoAutenticado'
+        '403':
+          $ref: '#/components/responses/Proibido'
+        '429':
+          $ref: '#/components/responses/LimiteExcedido'
+        '503':
+          $ref: '#/components/responses/ProvedorIndisponivel'
+  /health:
+    get:
+      tags: [Operação]
+      summary: Liveness
+      description: Responde 200 enquanto o processo estiver vivo. Sem autenticação e fora do rate limit.
+      operationId: health
+      responses:
+        '200':
+          description: Processo vivo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  service:
+                    type: string
+                    enum: [consolidado]
+  /ready:
+    get:
+      tags: [Operação]
+      summary: Readiness
+      description: |
+        Depende do PostgreSQL e da conexão com o RabbitMQ (consumidor ativo). O Redis é só cache e
+        não entra aqui: sem ele o serviço continua pronto e lê do banco.
+      operationId: ready
+      responses:
+        '200':
+          description: Pronto.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+        '503':
+          description: Banco ou broker indisponível.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [not ready]
+                  error:
+                    type: string
+  /metrics:
+    get:
+      tags: [Operação]
+      summary: Métricas no formato Prometheus
+      operationId: metrics
+      responses:
+        '200':
+          description: Métricas em texto.
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token de acesso OAuth2 (client credentials) emitido pelo Keycloak, RS256, audiência
+        `consolidado-api`, com o claim `comerciante_id` e o escopo `consolidado.read`.
+  responses:
+    ErroDeValidacao:
+      description: Parâmetros inválidos (data inexistente, intervalo invertido ou acima do máximo).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    NaoAutenticado:
+      description: Token ausente, inválido ou expirado.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    Proibido:
+      description: Escopo insuficiente ou token sem comerciante.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    LimiteExcedido:
+      description: Limite de requisições por minuto excedido.
+      headers:
+        Retry-After:
+          description: Segundos até a janela do limitador reiniciar.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    ProvedorIndisponivel:
+      description: O provedor de identidade não respondeu e a chave pública não está em cache.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  schemas:
+    Dinheiro:
+      type: string
+      pattern: '^-?\d+\.\d{2}$'
+      description: Decimal com 2 casas, como texto. Nunca número JSON.
+      example: '1500.00'
+    SaldoDia:
+      type: object
+      required: [data, totalCreditos, totalDebitos, resultadoDia, saldoAcumulado]
+      properties:
+        data:
+          type: string
+          format: date
+        totalCreditos:
+          $ref: '#/components/schemas/Dinheiro'
+        totalDebitos:
+          $ref: '#/components/schemas/Dinheiro'
+        resultadoDia:
+          allOf:
+            - $ref: '#/components/schemas/Dinheiro'
+          description: Créditos menos débitos apenas do dia.
+        saldoAcumulado:
+          allOf:
+            - $ref: '#/components/schemas/Dinheiro'
+          description: Soma do resultado de todos os dias do comerciante até a data, inclusive.
+    SaldoDoDia:
+      allOf:
+        - $ref: '#/components/schemas/SaldoDia'
+        - type: object
+          required: [source, comercianteId, ultimoEventoAplicadoEm]
+          properties:
+            source:
+              type: string
+              enum: [cache, database]
+            comercianteId:
+              type: string
+            ultimoEventoAplicadoEm:
+              type: string
+              format: date-time
+              nullable: true
+              description: Maior instante de lançamento já aplicado; indica o atraso, não garante completude com eventos fora de ordem.
+    SaldoDoIntervalo:
+      type: object
+      required: [comercianteId, inicio, fim, ultimoEventoAplicadoEm, dias]
+      properties:
+        comercianteId:
+          type: string
+        inicio:
+          type: string
+          format: date
+        fim:
+          type: string
+          format: date
+        ultimoEventoAplicadoEm:
+          type: string
+          format: date-time
+          nullable: true
+        dias:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaldoDia'
+    Problema:
+      type: object
+      description: Erro no formato RFC 7807.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        maxDias:
+          type: integer

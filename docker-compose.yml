@@ -189,6 +189,22 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ─── Testes unitários (profile opcional) ──────────────────────────────────
+  # Imagem do estágio "test" do Dockerfile, que tem as dependências de desenvolvimento.
+  # Uso: docker compose --profile test run --rm lancamentos-test
+
+  lancamentos-test:
+    profiles: ["test"]
+    build:
+      context: ./services/lancamentos
+      target: test
+
+  consolidado-test:
+    profiles: ["test"]
+    build:
+      context: ./services/consolidado
+      target: test
+
   # ─── Teste de carga (profile opcional) ────────────────────────────────────
 
   k6:

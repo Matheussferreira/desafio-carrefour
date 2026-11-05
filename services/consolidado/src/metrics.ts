@@ -37,6 +37,12 @@ export const consumerDlqTotal = new Counter({
   registers: [register],
 });
 
+export const consumerTransientTotal = new Counter({
+  name: 'consolidado_consumer_transient_errors_total',
+  help: 'Falhas transitórias (banco ou conexão) em que a mensagem ficou retida esperando, sem ir para a DLQ',
+  registers: [register],
+});
+
 export const rabbitmqConnected = new Gauge({
   name: 'consolidado_rabbitmq_connected',
   help: '1 quando a conexão do consumidor com o RabbitMQ está de pé, 0 caso contrário',

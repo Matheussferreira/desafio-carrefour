@@ -1,0 +1,55 @@
+﻿Teste de resiliência, rodada 49cf902d, 2026-11-05 18:36:09
+Quantidade por cenário: 30 lançamentos de 10.00 (cliente erp-loja-2)
+
+=== Cenário A: consolidado parado (data 2047-01-29) ===
+  consolidado parado
+  [OK]    lançamentos aceitos com o consolidado fora do ar: 30 de 30 (esperado 201 em todos)
+  mensagens aguardando na fila do consolidado: 30
+  [OK]    a fila retém os eventos enquanto o consolidado está fora
+  [OK]    saldo convergiu para 300 depois que o consolidado voltou (em 4.3 s)
+
+=== Cenário B: RabbitMQ parado (data 2045-11-21) ===
+  rabbitmq parado
+  [OK]    lançamentos aceitos com o broker fora do ar: 30 de 30 (esperado 201 em todos)
+  eventos pendentes no outbox: 30
+  [OK]    o outbox acumulou os eventos que não puderam ser publicados
+  [OK]    API de lançamentos segue pronta (/ready = 200)
+  [OK]    outbox drenou depois que o broker voltou (em 75.6 s)
+  [OK]    saldo convergiu para 300 (em 0 s)
+
+=== Cenário C: Redis parado (data 2056-10-28) ===
+  [OK]    lançamentos aceitos com tudo no ar: 30 de 30
+  [OK]    saldo convergiu para 300 com o Redis no ar (em 1.1 s)
+  redis parado
+  [OK]    consolidado segue pronto sem o Redis (/ready = 200)
+  [OK]    GET devolve 200 vindo do banco (source = database, total = 300.00)
+  [OK]    o GET sem Redis não fica esperando a reconexão (37 ms)
+  [OK]    lançamentos aceitos com o Redis fora do ar: 30 de 30
+  [OK]    o consumidor aplicou os eventos novos sem o Redis e o GET mostra 600 (em 0.7 s)
+  redis de volta
+  defasagem do cache depois da volta do Redis: 45.8 s (limite: TTL de 60 s)
+  [OK]    depois da volta do Redis o GET mostra o saldo correto dentro do TTL do cache
+
+=== Cenário D: banco do consolidado fora por 30 s (data 2058-11-09) ===
+  consolidado_db bloqueado (lancamentos_db segue no ar)
+  [OK]    lançamentos aceitos com o banco do consolidado fora: 30 de 30
+  [OK]    API de lançamentos segue pronta
+  [OK]    o consolidado sai de prontidão enquanto o banco dele está fora
+  na fila principal depois de 30 s de queda: 30 mensagem(ns) (1 retida(s) pelo consumidor)
+  [OK]    as mensagens ficam retidas na fila principal, não são descartadas
+  [OK]    nada foi para a DLQ durante os 30 s de queda
+  consolidado_db liberado
+  [OK]    saldo convergiu para 300 depois que o banco voltou (em 12.1 s)
+  [OK]    a DLQ continua sem mensagens novas
+  [OK]    a métrica consolidado_consumer_transient_errors_total registrou a espera (6)
+
+=== Cenário E: reprocessar a DLQ com scripts\reprocessar-dlq.ps1 (data 2064-03-27) ===
+  [OK]    a DLQ recebeu 1 evento válido e 1 mensagem quebrada
+  DLQ consolidado.lancamentos.dlq: 2 mensagem(ns)
+  Devolvidas à fila consolidado.lancamentos: 2
+  [OK]    reprocessar-dlq.ps1 terminou sem erro
+  [OK]    o evento válido voltou à fila principal e foi aplicado (saldo 7.00, em 0 s)
+  [OK]    a mensagem quebrada foi recusada de novo e voltou para a DLQ (reentregar não conserta dado inválido)
+
+RESULTADO: todas as verificações passaram
+Saída salva em C:\Users\Ease Nexus\Documents\desafio-arquiteto\docs\evidencias\resiliencia-ps1-20261105-183604.txt

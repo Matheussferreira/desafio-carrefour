@@ -74,10 +74,10 @@ O Keycloak aparece como componente próprio porque é o que o código usa hoje. 
 | Prometheus e Grafana (profile) | CloudWatch e, opcionalmente, Prometheus gerenciado | As métricas `*_http_*`, de outbox e de lag continuam as mesmas |
 | Jaeger (profile) | X-Ray via coletor OpenTelemetry (ADOT) | O código já exporta OTLP; só muda o destino |
 | `.env` e segredos do compose | Secrets Manager | Referenciado nas definições de tarefa por `secrets:` |
-| Dockerfile | ECR | Registro privado, com varredura de vulnerabilidades |
+| Dockerfile | ECR | Registro privado, com varredura de vulnerabilidades. A imagem é multi-stage, roda como o usuário `node` e leva só o código compilado e as dependências de produção |
 | (sem equivalente) | API Gateway, opcional | Throttling por cliente e plano de uso, que tirariam do código o rate limit em memória |
 
-> **Health check do ALB.** Use `/health` (liveness). O `/ready` do consolidado também faz `PING` no Redis, então uma queda do cache o deixaria 503 e o ALB retiraria todas as tarefas, embora o código saiba servir do banco. Ver o cenário "Redis fora do ar" em [arquitetura.md](arquitetura.md) e o ajuste em [evolucoes.md](evolucoes.md).
+> **Health check do ALB.** Pode usar `/ready`: o do consolidado depende só do PostgreSQL e da conexão com o broker, e o Redis, que é cache, fica de fora de propósito. Uma queda do cache não tira tarefas do balanceador (cenário C do [teste de resiliência](../tests/resiliencia/resiliencia.ps1)). `/health` serve como liveness do ECS.
 
 > **Bancos separados.** Um VACUUM agressivo ou um pool esgotado numa instância não afeta a outra, as políticas de backup são independentes e a capacidade acompanha o perfil de cada uma: lançamentos é de escrita, consolidado é de leitura.
 
@@ -121,6 +121,24 @@ Nenhum serviço escreve em segredos nem acessa recursos do outro. A comunicaçã
 **RabbitMQ:**
 - Amazon MQ com 3 nós em 3 AZs e quorum queues. As mensagens persistem enquanto a maioria dos nós (2 de 3) estiver de pé.
 - A DLQ `consolidado.lancamentos.dlq` é durável. O reprocessamento é manual hoje ([disaster-recovery.md](disaster-recovery.md)).
+
+---
+
+## Equivalência em outras nuvens
+
+A solução fala protocolos abertos (HTTP, OIDC, PostgreSQL, AMQP 0-9-1, protocolo do Redis, OTLP) e roda em contêineres comuns. **Nenhum componente do código depende de um serviço proprietário da AWS**: os serviços da tabela de mapeamento acima são a forma gerenciada de rodar o mesmo software, e trocá-los é questão de configuração e de operação, não de código. A tabela abaixo é só uma equivalência de componentes; não há estimativa de custo para estas nuvens.
+
+| Componente | AWS (este documento) | Azure | Google Cloud |
+|---|---|---|---|
+| Computação de contêineres | ECS Fargate | Azure Container Apps (ou AKS) | Cloud Run (ou GKE Autopilot) |
+| PostgreSQL gerenciado | RDS for PostgreSQL | Azure Database for PostgreSQL, servidor flexível | Cloud SQL for PostgreSQL |
+| Broker de mensagens | Amazon MQ for RabbitMQ | Sem RabbitMQ gerenciado de primeira parte: RabbitMQ próprio em AKS ou VM. O Service Bus fala AMQP 1.0, não o 0-9-1 do código, então exigiria trocar o cliente | Sem RabbitMQ gerenciado de primeira parte: RabbitMQ próprio em GKE ou VM. O Pub/Sub não fala AMQP, então exigiria reescrever o relay e o consumidor |
+| Redis | ElastiCache | Azure Cache for Redis (ou Azure Managed Redis) | Memorystore for Redis |
+| Identidade (OIDC) | Keycloak em contêiner (ou Cognito, com ajustes) | Keycloak em contêiner (ou Microsoft Entra ID, com ajustes de claims e escopos) | Keycloak em contêiner (ou Identity Platform, com ajustes) |
+| Segredos | Secrets Manager | Key Vault | Secret Manager |
+| Observabilidade | CloudWatch e X-Ray (via coletor OpenTelemetry) | Azure Monitor e Application Insights (OTLP) | Cloud Monitoring, Cloud Logging e Cloud Trace (OTLP) |
+
+O ponto de atenção é o broker: nas três nuvens a opção sem alterar código é o RabbitMQ, gerenciado na AWS e operado pela equipe nas outras duas. A troca por um serviço nativo de fila (SQS e SNS, Service Bus, Pub/Sub) está discutida no [ADR-003](adrs/ADR-003-rabbitmq-vs-kafka-vs-sqs.md) e mexe no relay e no consumidor. As equivalências de identidade que não são o Keycloak mudam a forma dos claims e dos escopos, como descrito no [ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
 
 ---
 

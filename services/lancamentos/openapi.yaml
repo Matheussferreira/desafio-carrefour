@@ -1,0 +1,336 @@
+openapi: 3.0.3
+info:
+  title: Serviço de Lançamentos
+  version: 1.1.0
+  description: |
+    Registra créditos e débitos de um comerciante e publica o evento `LancamentoRegistrado`
+    (Outbox Pattern). O comerciante vem do claim `comerciante_id` do token, nunca do corpo.
+    Erros no formato RFC 7807 (`application/problem+json`).
+
+    Este arquivo é conferido contra as rotas do Express por `tests/unit/openapi.test.ts`
+    e contra respostas reais por `tests/integration/contrato-openapi.test.ts`.
+servers:
+  - url: http://localhost:3001
+    description: Ambiente local (docker compose)
+tags:
+  - name: Lançamentos
+  - name: Operação
+paths:
+  /lancamentos:
+    post:
+      tags: [Lançamentos]
+      summary: Registra um lançamento
+      description: |
+        Grava o lançamento e o evento do outbox na mesma transação. Com `X-Idempotency-Key`, o reenvio
+        do mesmo corpo devolve o lançamento original (200, `Idempotent-Replayed: true`) e o mesmo
+        cabeçalho com outro corpo devolve 409. A chave vale por comerciante.
+      operationId: registrarLancamento
+      security:
+        - bearer: [lancamentos.write]
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          description: Chave de idempotência, de 1 a 255 caracteres.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          description: Identificador de correlação propagado até o evento. Gerado se ausente.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NovoLancamento'
+      responses:
+        '201':
+          description: Lançamento criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lancamento'
+        '200':
+          description: Reenvio idempotente; devolve o lançamento original.
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lancamento'
+        '400':
+          $ref: '#/components/responses/ErroDeValidacao'
+        '401':
+          $ref: '#/components/responses/NaoAutenticado'
+        '403':
+          $ref: '#/components/responses/Proibido'
+        '409':
+          description: A `X-Idempotency-Key` já foi usada com um corpo diferente.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+        '413':
+          $ref: '#/components/responses/CorpoGrande'
+        '429':
+          $ref: '#/components/responses/LimiteExcedido'
+        '503':
+          $ref: '#/components/responses/ProvedorIndisponivel'
+    get:
+      tags: [Lançamentos]
+      summary: Lista os lançamentos do comerciante, do mais recente ao mais antigo
+      description: |
+        Paginação por cursor. Use `proximoCursor` da resposta como `cursor` da próxima chamada;
+        `null` indica a última página. O cursor é opaco e só vale para o mesmo conjunto de filtros.
+      operationId: listarLancamentos
+      security:
+        - bearer: [lancamentos.read]
+      parameters:
+        - name: data
+          in: query
+          required: false
+          description: Filtra pela data de competência (YYYY-MM-DD, data real do calendário).
+          schema:
+            type: string
+            format: date
+        - name: limite
+          in: query
+          required: false
+          description: Itens por página.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Valor de `proximoCursor` da página anterior.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Uma página de lançamentos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginaDeLancamentos'
+        '400':
+          $ref: '#/components/responses/ErroDeValidacao'
+        '401':
+          $ref: '#/components/responses/NaoAutenticado'
+        '403':
+          $ref: '#/components/responses/Proibido'
+        '429':
+          $ref: '#/components/responses/LimiteExcedido'
+        '503':
+          $ref: '#/components/responses/ProvedorIndisponivel'
+  /health:
+    get:
+      tags: [Operação]
+      summary: Liveness
+      description: Responde 200 enquanto o processo estiver vivo. Sem autenticação e fora do rate limit.
+      operationId: health
+      responses:
+        '200':
+          description: Processo vivo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  service:
+                    type: string
+                    enum: [lancamentos]
+  /ready:
+    get:
+      tags: [Operação]
+      summary: Readiness
+      description: Depende só do banco. A API segue pronta com o RabbitMQ fora, porque quem publica é o relay.
+      operationId: ready
+      responses:
+        '200':
+          description: Pronto para receber lançamentos.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+        '503':
+          description: Banco indisponível.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [not ready]
+                  error:
+                    type: string
+  /metrics:
+    get:
+      tags: [Operação]
+      summary: Métricas no formato Prometheus
+      operationId: metrics
+      responses:
+        '200':
+          description: Métricas em texto.
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token de acesso OAuth2 (client credentials) emitido pelo Keycloak, RS256, audiência
+        `lancamentos-api`, com o claim `comerciante_id` e o escopo exigido pela operação.
+  responses:
+    ErroDeValidacao:
+      description: Parâmetros ou corpo inválidos.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    NaoAutenticado:
+      description: Token ausente, inválido ou expirado.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    Proibido:
+      description: Escopo insuficiente ou token sem comerciante.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    CorpoGrande:
+      description: Corpo acima de 16 kB.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    LimiteExcedido:
+      description: Limite de requisições por minuto excedido.
+      headers:
+        Retry-After:
+          description: Segundos até a janela do limitador reiniciar.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    ProvedorIndisponivel:
+      description: O provedor de identidade não respondeu e a chave pública não está em cache.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  schemas:
+    NovoLancamento:
+      type: object
+      required: [valor, tipo, data]
+      properties:
+        valor:
+          type: string
+          pattern: '^\d{1,9}(\.\d{1,2})?$'
+          description: Decimal positivo como texto, até 2 casas e no máximo 999999999.99. Nunca número JSON.
+          example: '150.00'
+        tipo:
+          type: string
+          enum: [credito, debito]
+        descricao:
+          type: string
+          maxLength: 500
+        data:
+          type: string
+          format: date
+          description: Data de competência (YYYY-MM-DD), data real do calendário.
+          example: '2026-06-15'
+    Lancamento:
+      type: object
+      required: [id, valor, tipo, descricao, data, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        valor:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+        tipo:
+          type: string
+          enum: [credito, debito]
+        descricao:
+          type: string
+          nullable: true
+        data:
+          type: string
+          format: date
+        created_at:
+          type: string
+          format: date-time
+    PaginaDeLancamentos:
+      type: object
+      required: [itens, proximoCursor]
+      properties:
+        itens:
+          type: array
+          items:
+            $ref: '#/components/schemas/Lancamento'
+        proximoCursor:
+          type: string
+          nullable: true
+          description: Cursor da próxima página, ou null na última.
+    Problema:
+      type: object
+      description: Erro no formato RFC 7807.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          example: /problems/validation-error
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            required: [campo, mensagem]
+            properties:
+              campo:
+                type: string
+              mensagem:
+                type: string
