@@ -57,7 +57,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     res.setHeader('WWW-Authenticate', desafio());
-    sendProblem(res, 401, 'unauthorized', 'Não autenticado', 'Envie o cabeçalho Authorization: Bearer <token>.');
+    sendProblem(res, 401, 'unauthorized', 'Não autenticado', 'Envie o cabeçalho Authorization com o esquema Bearer e o token de acesso.');
     return;
   }
 
