@@ -56,6 +56,34 @@ services:
     ports:
       - "6379:6379"
 
+  # Provedor de identidade (OIDC). Modo de desenvolvimento: banco embutido e realm importado.
+  # Os serviços só consultam o JWKS dele; se o Keycloak cair, tokens já emitidos continuam
+  # válidos até expirar e as chaves ficam em cache nos serviços.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Issuer estável (http://localhost:8080/realms/caixa) seja qual for o host usado na chamada,
+      # porque os serviços validam o claim iss por igualdade.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm-caixa.json:/opt/keycloak/data/import/realm-caixa.json:ro
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout --preserve-status 2 cat <&3 | grep -q '\"status\": \"UP\"'"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    ports:
+      - "8080:8080"
+
   # ─── Serviços de negócio ───────────────────────────────────────────────────
 
   # API de lançamentos: só depende do banco. Não fala com o RabbitMQ.
@@ -68,7 +96,10 @@ services:
       NODE_ENV: production
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lancamentos_db
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      # Issuer público (igual ao claim iss dos tokens) e JWKS pela rede interna
+      OIDC_ISSUER: http://localhost:8080/realms/caixa
+      OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
+      OIDC_AUDIENCE: lancamentos-api
       TZ: America/Sao_Paulo
     ports:
       - "3001:3001"
@@ -123,7 +154,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/consolidado_db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-rabbit}:${RABBITMQ_PASS:-rabbit}@rabbitmq:5672
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      OIDC_ISSUER: http://localhost:8080/realms/caixa
+      OIDC_JWKS_URI: http://keycloak:8080/realms/caixa/protocol/openid-connect/certs
+      OIDC_AUDIENCE: consolidado-api
       TZ: America/Sao_Paulo
     ports:
       - "3002:3002"
@@ -152,8 +185,14 @@ services:
     environment:
       LANCAMENTOS_URL: http://lancamentos:3001
       CONSOLIDADO_URL: http://consolidado:3002
+      # Credencial de integração do comerciante loja-1 (segredo de desenvolvimento do realm importado)
+      KEYCLOAK_URL: http://keycloak:8080
+      CLIENT_ID: erp-loja-1
+      CLIENT_SECRET: dev-segredo-erp-loja-1
     command: run /scripts/consolidado.js
     depends_on:
+      keycloak:
+        condition: service_healthy
       lancamentos:
         condition: service_healthy
       consolidado:

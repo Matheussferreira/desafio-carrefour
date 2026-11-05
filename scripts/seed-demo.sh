@@ -2,16 +2,17 @@
 # Popula o sistema com lançamentos de exemplo, pela API (nunca direto no banco).
 # Opcional. Pode rodar mais de uma vez no mesmo dia: as chaves de idempotência evitam duplicar.
 #
-# Uso: bash scripts/seed-demo.sh   (COMERCIANTE=loja-1 bash scripts/seed-demo.sh para outro comerciante)
+# O token vem do Keycloak. O comerciante é o da credencial usada (erp-loja-1 é a loja-1).
+#
+# Uso: bash scripts/seed-demo.sh   (CLIENTE=erp-loja-2 bash scripts/seed-demo.sh para outra credencial)
 
 set -euo pipefail
 
 LANCAMENTOS_URL="${LANCAMENTOS_URL:-http://localhost:3001}"
 CONSOLIDADO_URL="${CONSOLIDADO_URL:-http://localhost:3002}"
-COMERCIANTE="${COMERCIANTE:-padrao}"
+CLIENTE="${CLIENTE:-erp-loja-1}"
 
-TOKEN=$(curl -s -X POST "$LANCAMENTOS_URL/auth/login" \
-  -H 'Content-Type: application/json' -d "{\"comerciante\":\"$COMERCIANTE\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+TOKEN=$(bash "$(dirname "$0")/obter-token.sh" "$CLIENTE")
 
 HOJE=$(date +%F)
 ONTEM=$(date -d 'yesterday' +%F 2>/dev/null || date -v-1d +%F)

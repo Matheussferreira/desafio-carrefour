@@ -33,6 +33,9 @@ const nonOkRate = new Rate('non_ok_rate');
 const TEST_DATE       = __ENV.TEST_DATE       || '2026-06-27';
 const LANCAMENTOS_URL = __ENV.LANCAMENTOS_URL || 'http://localhost:3001';
 const CONSOLIDADO_URL = __ENV.CONSOLIDADO_URL || 'http://localhost:3002';
+const KEYCLOAK_URL    = __ENV.KEYCLOAK_URL    || 'http://localhost:8080';
+const CLIENT_ID       = __ENV.CLIENT_ID       || 'erp-loja-1';
+const CLIENT_SECRET   = __ENV.CLIENT_SECRET   || 'dev-segredo-erp-loja-1';
 
 // 60 datas distintas para o cenário cache_miss.
 // Intervalo escolhido no passado recente (fev–abr 2026): sem conflito com TEST_DATE.
@@ -74,7 +77,7 @@ export const options = {
 
 /**
  * setup() roda UMA VEZ antes de todos os cenários.
- *   1. JWT via /auth/login
+ *   1. Token OAuth2 (client credentials) no Keycloak
  *   2. Seed 10 lançamentos em TEST_DATE (cenário cache_hit)
  *   3. Seed 1 lançamento por data em CACHE_MISS_DATES (cenário cache_miss)
  *   4. Aguarda 7s de consistência eventual
@@ -83,16 +86,16 @@ export const options = {
  *      (o TTL de 60s expira antes de T=70s quando cache_miss inicia)
  */
 export function setup() {
-  // ── 1. JWT ───────────────────────────────────────────────────────────────────
-  const loginRes = http.post(
-    `${LANCAMENTOS_URL}/auth/login`,
-    JSON.stringify({}),
-    { headers: { 'Content-Type': 'application/json' } },
+  // ── 1. Token no Keycloak ─────────────────────────────────────────────────────
+  // Vale 300 s, mais que o teste inteiro. O comerciante é o da credencial (loja-1).
+  const tokenRes = http.post(
+    `${KEYCLOAK_URL}/realms/caixa/protocol/openid-connect/token`,
+    { grant_type: 'client_credentials', client_id: CLIENT_ID, client_secret: CLIENT_SECRET },
   );
-  if (loginRes.status !== 200) {
-    throw new Error(`[setup] Login falhou: HTTP ${loginRes.status} — ${loginRes.body}`);
+  if (tokenRes.status !== 200) {
+    throw new Error(`[setup] Token no Keycloak falhou: HTTP ${tokenRes.status} ${tokenRes.body}`);
   }
-  const token = loginRes.json('token');
+  const token = tokenRes.json('access_token');
   const authHeaders = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,

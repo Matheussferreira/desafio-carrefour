@@ -1,0 +1,239 @@
+{
+  "realm": "caixa",
+  "displayName": "Fluxo de Caixa",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "bruteForceProtected": true,
+  "clientScopes": [
+    {
+      "name": "lancamentos.write",
+      "description": "Registrar lançamentos",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "audiencia-lancamentos-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "lancamentos-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "lancamentos.read",
+      "description": "Consultar lançamentos",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "audiencia-lancamentos-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "lancamentos-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "consolidado.read",
+      "description": "Consultar o saldo consolidado",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "audiencia-consolidado-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "consolidado-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "erp-loja-1",
+      "name": "ERP da loja 1",
+      "description": "Credencial de integração do comerciante loja-1. Segredo de desenvolvimento, nunca usar em produção.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-segredo-erp-loja-1",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "access.token.lifespan": "300"
+      },
+      "defaultClientScopes": [
+        "lancamentos.write",
+        "lancamentos.read",
+        "consolidado.read"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "comerciante_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "comerciante_id",
+            "claim.value": "loja-1",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "erp-loja-2",
+      "name": "ERP da loja 2",
+      "description": "Credencial de integração do comerciante loja-2. Segredo de desenvolvimento, nunca usar em produção.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-segredo-erp-loja-2",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "access.token.lifespan": "300"
+      },
+      "defaultClientScopes": [
+        "lancamentos.write",
+        "lancamentos.read",
+        "consolidado.read"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "comerciante_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "comerciante_id",
+            "claim.value": "loja-2",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "bi-loja-1",
+      "name": "BI da loja 1 (somente leitura do consolidado)",
+      "description": "Credencial de integração do comerciante loja-1. Segredo de desenvolvimento, nunca usar em produção.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-segredo-bi-loja-1",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "access.token.lifespan": "300"
+      },
+      "defaultClientScopes": [
+        "consolidado.read"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "comerciante_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "comerciante_id",
+            "claim.value": "loja-1",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "contabil-loja-1",
+      "name": "Contabilidade da loja 1 (leitura de lançamentos e consolidado)",
+      "description": "Credencial de integração do comerciante loja-1. Segredo de desenvolvimento, nunca usar em produção.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-segredo-contabil-loja-1",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "access.token.lifespan": "300"
+      },
+      "defaultClientScopes": [
+        "lancamentos.read",
+        "consolidado.read"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "comerciante_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "comerciante_id",
+            "claim.value": "loja-1",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -47,7 +47,7 @@ O comando:
 
 1. Inicia o container k6 na rede interna do compose
 2. Executa `setup()`:
-   - Obtém JWT via `POST /auth/login`
+   - Obtém o token no Keycloak (client credentials, cliente `erp-loja-1`)
    - Insere 10 lançamentos em `TEST_DATE` (padrão: `2026-06-27`)
    - Insere 1 lançamento em cada uma das 60 datas do cenário `cache_miss`
    - Aguarda 7s para propagação eventual (SLA ≤ 5s)

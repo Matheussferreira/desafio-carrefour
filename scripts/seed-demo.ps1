@@ -1,18 +1,20 @@
 ﻿# Popula o sistema com lançamentos de exemplo, pela API (nunca direto no banco).
 # Opcional. Pode rodar mais de uma vez no mesmo dia: as chaves de idempotência evitam duplicar.
 #
-# Uso: .\scripts\seed-demo.ps1
+# O token vem do Keycloak. O comerciante é o da credencial usada (erp-loja-1 é a loja-1).
+#
+# Uso: .\scripts\seed-demo.ps1 [-Cliente erp-loja-2]
 param(
     [string]$LancamentosUrl = 'http://localhost:3001',
     [string]$ConsolidadoUrl = 'http://localhost:3002',
-    [string]$Comerciante = 'padrao'
+    [string]$KeycloakUrl = 'http://localhost:8080',
+    [string]$Cliente = 'erp-loja-1'
 )
 
 $ErrorActionPreference = 'Stop'
 
-$login = Invoke-RestMethod -Method Post -Uri "$LancamentosUrl/auth/login" `
-    -ContentType 'application/json' -Body (@{ comerciante = $Comerciante } | ConvertTo-Json -Compress)
-$auth = @{ Authorization = "Bearer $($login.token)" }
+$token = & "$PSScriptRoot\obter-token.ps1" -Cliente $Cliente -KeycloakUrl $KeycloakUrl
+$auth = @{ Authorization = "Bearer $token" }
 
 $hoje = (Get-Date).ToString('yyyy-MM-dd')
 $ontem = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
@@ -39,5 +41,5 @@ Start-Sleep -Seconds 4
 
 foreach ($dia in @($ontem, $hoje)) {
     $c = Invoke-RestMethod -Uri "$ConsolidadoUrl/consolidado/$dia" -Headers $auth
-    Write-Host ("{0}  creditos={1}  debitos={2}  resultado={3}  acumulado={4}" -f $c.data, $c.totalCreditos, $c.totalDebitos, $c.resultadoDia, $c.saldoAcumulado)
+    Write-Host ("{0}  {1}  creditos={2}  debitos={3}  resultado={4}  acumulado={5}" -f $c.data, $c.comercianteId, $c.totalCreditos, $c.totalDebitos, $c.resultadoDia, $c.saldoAcumulado)
 }
