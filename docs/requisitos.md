@@ -24,7 +24,9 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 |---|---|
 | RF-06 | Consumir `LancamentoRegistrado` e atualizar a projeção de saldo diário com upsert atômico (`ON CONFLICT DO UPDATE SET saldo = saldo + delta`) |
 | RF-07 | Garantir idempotência: o mesmo `eventoId` nunca altera o saldo duas vezes, independente de quantas vezes o broker o entregue |
-| RF-08 | Retornar o saldo consolidado de um dia: `total_creditos`, `total_debitos`, `saldo` |
+| RF-08 | Retornar, para um comerciante e uma data: `totalCreditos`, `totalDebitos`, `resultadoDia`, `saldoAcumulado` (soma de todos os dias até a data) e `atualizadoAte` (instante do último lançamento aplicado). Dia sem movimento responde 200 com zeros no dia e o acumulado vigente |
+| RF-10 | Consultar um intervalo de datas (`GET /consolidado?inicio=&fim=`), com um item por dia e limite de 92 dias |
+| RF-11 | Multi-comerciante: todos os dados, a chave de idempotência e o cache são separados por comerciante, que vem do claim `comerciante_id` do token e nunca do corpo da requisição |
 | RF-09 | Servir saldo do cache Redis com fallback transparente no banco (cliente não percebe o miss) |
 
 ---
@@ -37,7 +39,7 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 | RNF-02 | **Throughput** | Consolidado suporta 50 req/s no `GET /consolidado/{data}` | Cache Redis (hit <1ms) + fallback Postgres (1-5ms); rate limiter em 6.000 req/min (100 req/s) não bloqueia a 50 req/s |
 | RNF-03 | **Perda de requisições** | Menos de 5% sob 50 req/s | Rate limiter de 6.000 req/min por IP + cache absorvendo picos |
 | RNF-04 | **Latência** | p95 < 500ms no `GET /consolidado` | Cache hit típico <1ms; miss + Postgres ~5ms; SLO de produção sugerido: p95 < 100ms (cache hit) / p95 < 200ms (miss) |
-| RNF-05 | **Consistência eventual** | Saldo reflete todos os lançamentos em até ~5s após o registro | Outbox relay a cada 1s + propagação AMQP <5ms + processamento do consumer |
+| RNF-05 | **Consistência eventual** | Saldo reflete todos os lançamentos em até ~5s após o registro; o `atualizadoAte` da resposta mostra até onde | Outbox relay a cada 1s + propagação AMQP <5ms + processamento do consumer |
 | RNF-06 | **Sem perda de eventos** | Nenhum `LancamentoRegistrado` pode ser perdido | Outbox: evento gravado na transação do lançamento; broker: fila durável; relay: só marca como publicado após a confirmação do broker (publisher confirms), retenta indefinidamente e pode rodar em várias réplicas sem duplicar (`FOR UPDATE SKIP LOCKED`) |
 | RNF-07 | **Idempotência** | Redelivery de evento nunca duplica o saldo | `eventos_processados` com `ON CONFLICT DO NOTHING` na mesma transação do upsert de saldo |
 | RNF-08 | **Segurança** | Endpoints de negócio exigem JWT; valores monetários nunca como float | JWT Bearer em todas as rotas protegidas; `NUMERIC(15,2)` no banco; `decimal.js` na aplicação |
@@ -46,14 +48,15 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 
 ---
 
-## Contrato do Evento — Invariantes de Schema
+## Contrato do evento: invariantes de schema
 
 | Campo | Regra |
 |---|---|
 | `eventoId` | UUID v4 único por evento; nunca reutilizado; PK em `eventos_processados` |
-| `schemaVersion` | `"1.0"` para todos os eventos emitidos neste baseline; consumer valida apenas `tipo`, não a versão |
+| `schemaVersion` | `"1.1"` nos eventos emitidos hoje. O consumidor aceita `1.0` (comerciante padrão) e qualquer `1.x`, e recusa `2.x`. Política em [eventos.md](eventos.md) |
+| `comercianteId` | Obrigatório a partir da 1.1; 1 a 64 caracteres entre letras, números, hífen e sublinhado |
 | `data.valor` | String com valor decimal positivo, 2 casas decimais (ex: `"1500.00"`); **nunca float** |
-| `data.data` | YYYY-MM-DD; define qual linha de `saldo_diario` é afetada |
+| `data.data` | YYYY-MM-DD real; define qual linha de `saldo_diario` (comerciante e data) é afetada |
 
 ---
 

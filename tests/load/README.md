@@ -93,9 +93,9 @@ docker run --rm -i \
 INFO [setup] Populando 2026-06-27 (cache_hit)...
 INFO [setup] Populando 60 datas (cache_miss)...
 INFO [setup] Aguardando propagação (SLA ≤ 5s; margem: 7s)...
-INFO [setup] cache_hit OK → {"source":"database","data":"2026-06-27T03:00:00.000Z","total_creditos":"1400.00",...}
-INFO [setup] cache_miss sample OK → 2026-02-01: {"source":"database","data":"2026-02-01T03:00:00.000Z",...}
-INFO [setup] cache_miss sample OK → 2026-04-01: {"source":"database","data":"2026-04-01T03:00:00.000Z",...}
+INFO [setup] cache_hit OK → {"source":"database","data":"2026-06-27","totalCreditos":"1400.00",...}
+INFO [setup] cache_miss sample OK → 2026-02-01: {"source":"database","data":"2026-02-01",...}
+INFO [setup] cache_miss sample OK → 2026-04-01: {"source":"database","data":"2026-04-01",...}
 
      ✓ HTTP 200
      ✓ latência < 500ms

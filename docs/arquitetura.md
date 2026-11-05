@@ -27,9 +27,9 @@ C4Container
     Container(lancamentos, "Serviço Lancamentos", "Node.js 20 / Express", "Registra débitos e créditos; publica eventos via Outbox")
     Container(consolidado, "Serviço Consolidado", "Node.js 20 / Express", "Consome eventos e mantém projeção de saldo diário")
     ContainerDb(pg_l, "lancamentos_db", "PostgreSQL 16", "Tabelas: lancamentos, outbox")
-    ContainerDb(pg_c, "consolidado_db", "PostgreSQL 16", "Tabelas: saldo_diario, eventos_processados")
+    ContainerDb(pg_c, "consolidado_db", "PostgreSQL 16", "Tabelas: saldo_diario (PK comerciante_id + data), comerciante_progresso, eventos_processados")
     Container(mq, "RabbitMQ", "RabbitMQ 3.13", "Exchange: lancamentos.events (topic) + DLX/DLQ")
-    Container(redis, "Redis", "Redis 7", "Cache de saldo_diario com TTL 60s")
+    Container(redis, "Redis", "Redis 7", "Cache do saldo por comerciante e data, TTL 60s")
 
     Rel(comerciante, lancamentos, "POST /lancamentos, GET /lancamentos", "HTTPS")
     Rel(comerciante, consolidado, "GET /consolidado/{data}", "HTTPS")
@@ -37,7 +37,7 @@ C4Container
     Rel(lancamentos, mq, "Publica LancamentoRegistrado (via Outbox Relay)", "AMQP")
     Rel(consolidado, mq, "Consome LancamentoRegistrado; NACK → DLX → DLQ", "AMQP")
     Rel(consolidado, pg_c, "Upsert saldo_diario, INSERT eventos_processados", "SQL")
-    Rel(consolidado, redis, "GET/SET/DEL saldo:{data}", "Redis protocol")
+    Rel(consolidado, redis, "GET/SET/DEL saldo:{comerciante}:{data}", "Redis protocol")
 ```
 
 ---
@@ -77,17 +77,17 @@ C4Component
         Component(consumer, "Consumer", "amqplib + withRetry", "prefetch=1; 1 tentativa inicial + 3 retries com backoff 1s/2s/4s; NACK sem requeue após esgotar → DLQ")
         Component(retry, "withRetry", "utility pura", "Executa fn até maxRetries+1 vezes; onRetry callback por cada falha intermediária; retorna Result discriminado")
         Component(db_c, "DB Pool", "node-postgres", "Pool para consolidado_db; transações para INSERT eventos_processados + UPSERT saldo_diario")
-        Component(redis_c, "Redis Client", "ioredis", "GET saldo:{data} → hit retorna JSON; miss → query DB → SETEX 60s; DEL após processamento de evento")
+        Component(redis_c, "Redis Client", "ioredis", "GET saldo:{comerciante}:{data} → hit retorna JSON; miss → query DB → SETEX 60s; após cada evento apaga a data e as posteriores do comerciante")
         Component(rmq_c, "RabbitMQ Client", "amqplib", "assertExchange + assertQueue + bindQueue; DLX configurado via x-dead-letter-exchange; prefetch=1")
         Component(metrics_c, "Métricas", "prom-client", "HTTP counters, events_processed_total por tipo/status, consumer_retries_total, consumer_dlq_total")
     }
 
     Rel(api_c, auth_c, "Passa por antes de qualquer lógica de negócio")
-    Rel(api_c, redis_c, "GET saldo:{data}")
-    Rel(api_c, db_c, "Fallback: SELECT saldo_diario WHERE data=$1")
+    Rel(api_c, redis_c, "GET saldo:{comerciante}:{data}")
+    Rel(api_c, db_c, "Fallback: soma de saldo_diario do comerciante até a data")
     Rel(consumer, retry, "withRetry(() => processEvent(raw), 3, [1000,2000,4000])")
     Rel(retry, db_c, "BEGIN → INSERT eventos_processados (ON CONFLICT DO NOTHING) → UPSERT saldo_diario → COMMIT")
-    Rel(retry, redis_c, "DEL saldo:{data} após COMMIT (falha não-fatal)")
+    Rel(retry, redis_c, "invalida a data e as posteriores após o COMMIT (falha não-fatal)")
     Rel(consumer, rmq_c, "ACK em sucesso ou skip; NACK(false,false) após esgotar retries → DLQ via DLX")
 ```
 
@@ -122,21 +122,21 @@ sequenceDiagram
     CONS->>DB_C: BEGIN TRANSACTION
     CONS->>DB_C: INSERT eventos_processados (eventoId) ON CONFLICT DO NOTHING
     Note over DB_C: rowCount=1 → evento novo; rowCount=0 → já processado, skip + ACK
-    CONS->>DB_C: UPSERT saldo_diario SET saldo = saldo_diario.saldo + delta
+    CONS->>DB_C: UPSERT saldo_diario (comerciante, data) SET saldo = saldo_diario.saldo + delta; UPSERT comerciante_progresso
     CONS->>DB_C: COMMIT
-    CONS->>REDIS: DEL saldo:{data} (invalida cache)
+    CONS->>REDIS: invalida saldo:{comerciante}:{data} e as datas posteriores
     CONS->>RMQ: channel.ack(msg)
 
     C->>CONS: GET /consolidado/2026-06-24
-    CONS->>REDIS: GET saldo:2026-06-24
+    CONS->>REDIS: GET saldo:loja-7:2026-06-24
     alt cache hit
-        REDIS-->>CONS: JSON {total_creditos, total_debitos, saldo}
+        REDIS-->>CONS: JSON {totalCreditos, totalDebitos, resultadoDia, saldoAcumulado}
     else cache miss
-        CONS->>DB_C: SELECT * FROM saldo_diario WHERE data=$1
+        CONS->>DB_C: SELECT somas FROM saldo_diario WHERE comerciante_id=$1 AND data <= $2
         DB_C-->>CONS: row
-        CONS->>REDIS: SETEX saldo:2026-06-24 60
+        CONS->>REDIS: SETEX saldo:loja-7:2026-06-24 60
     end
-    CONS-->>C: 200 {total_creditos, total_debitos, saldo, source}
+    CONS-->>C: 200 {totalCreditos, totalDebitos, resultadoDia, saldoAcumulado, atualizadoAte, source}
 ```
 
 ---
@@ -190,43 +190,6 @@ sequenceDiagram
 
 ---
 
-## Contrato do Evento `LancamentoRegistrado`
+## Contrato do evento `LancamentoRegistrado`
 
-### Campos
-
-| Campo | Tipo | Emitido pelo relay | Descrição |
-|---|---|---|---|
-| `eventoId` | `string (UUID v4)` | `uuid()` | ID único do evento — PK em `eventos_processados` para idempotência |
-| `schemaVersion` | `string` | `"1.0"` | Versão do schema; consumidor valida apenas se `tipo` é conhecido |
-| `tipo` | `string` | `"LancamentoRegistrado"` | Tipo do evento; mensagens com tipo desconhecido são ACKadas sem processar |
-| `correlationId` | `string (UUID v4)` | do header `X-Correlation-Id` ou gerado | ID de rastreamento; propagado nos logs do consumer para correlação manual |
-| `createdAt` | `string (ISO 8601)` | `new Date().toISOString()` | Timestamp de criação do evento |
-| `data.lancamentoId` | `string (UUID v4)` | ID do registro em `lancamentos` | FK lógica ao lançamento de origem (sem JOIN) |
-| `data.valor` | `string` | valor como `NUMERIC(15,2)` convertido a string | Valor monetário como string decimal — **nunca float** |
-| `data.tipo` | `"credito" \| "debito"` | do campo `tipo` do lançamento | Determina se o delta é positivo ou negativo no saldo |
-| `data.descricao` | `string \| null` | campo opcional do lançamento | Descrição; não afeta o cálculo do saldo |
-| `data.data` | `string (YYYY-MM-DD)` | campo `data` do lançamento | **Data de competência** — determina qual linha de `saldo_diario` é atualizada |
-
-### Exemplo
-
-```json
-{
-  "eventoId": "550e8400-e29b-41d4-a716-446655440000",
-  "schemaVersion": "1.0",
-  "tipo": "LancamentoRegistrado",
-  "correlationId": "7f3e9c1a-0000-4000-a000-000000000001",
-  "createdAt": "2026-06-24T14:30:00.000Z",
-  "data": {
-    "lancamentoId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "valor": "1500.00",
-    "tipo": "credito",
-    "descricao": "Venda produto X",
-    "data": "2026-06-24"
-  }
-}
-```
-
-### Política de Versionamento
-
-- **Mudanças compatíveis** (adição de campo opcional): incrementar `schemaVersion` menor (ex: `"1.1"`). O consumidor tolera campos desconhecidos.
-- **Mudanças incompatíveis** (remoção de campo obrigatório, mudança de tipo): criar novo tipo de evento (`LancamentoRegistrado.v2`) e consumir os dois durante um período de transição. Nunca exige deploy coordenado dos dois serviços.
+O contrato completo, o histórico de versões (1.0 e 1.1) e a política de versionamento estão em [eventos.md](eventos.md).

@@ -10,8 +10,8 @@ O sistema tem dois bounded contexts porque possuem **invariantes distintas, cicl
 | O que nunca pode falhar | Registro do lançamento | — |
 | Pode ficar indisponível? | Não — requisito explícito | Sim — consistência eventual é aceitável |
 | Modelo de escrita | OLTP, write-heavy, request-driven | Event-driven, append via eventos do broker |
-| Modelo de leitura | Listagem por data | Projeção agregada (`saldo_diario`) |
-| Schema de banco | `lancamentos`, `outbox` | `saldo_diario`, `eventos_processados` |
+| Modelo de leitura | Listagem por data e comerciante | Projeção agregada por comerciante e data (`saldo_diario`) |
+| Schema de banco | `lancamentos`, `outbox` | `saldo_diario`, `comerciante_progresso`, `eventos_processados` |
 | Quem escreve no banco | API (request do cliente) | Consumer (evento do broker) |
 
 Colocar os dois no mesmo processo os tornaria **cúmplices em falha**: um crash no Consumer, um OOM ou um deadlock no Consolidado derrubaria o processo inteiro, levando o endpoint de lançamentos junto. A separação de processo — com comunicação assíncrona — é a única forma de satisfazer o requisito de disponibilidade independente (RNF-01) sem circuit breakers internos que mascaram perdas de dados.
@@ -37,7 +37,7 @@ Colocar os dois no mesmo processo os tornaria **cúmplices em falha**: um crash 
 
 | Termo | Definição neste contexto |
 |---|---|
-| **Saldo Diário** | Projeção agregada por data: `total_creditos`, `total_debitos`, `saldo = creditos - debitos`; armazenado em `saldo_diario` |
+| **Saldo Diário** | Projeção por comerciante e data: `total_creditos`, `total_debitos`, resultado do dia (`creditos - debitos`); armazenado em `saldo_diario`. O **saldo acumulado** é a soma do resultado do dia até a data, calculada na consulta (ver ADR-009) |
 | **Evento Processado** | Registro na tabela `eventos_processados` de um `eventoId` já aplicado ao saldo; garante idempotência do consumer |
 | **Cache de Saldo** | Representação em Redis do saldo de uma data; TTL de 60s; **não é fonte de verdade** — pode ser descartado a qualquer momento |
 | **Consistência Eventual** | O saldo reflete todos os lançamentos em até 5s após o registro; um GET durante esse intervalo pode retornar saldo desatualizado por no máximo o tempo de propagação do evento |

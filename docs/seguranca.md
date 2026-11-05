@@ -4,7 +4,7 @@
 
 ### Autenticação — JWT
 
-- Todos os endpoints de negócio (`/lancamentos`, `/consolidado`) exigem JWT Bearer token
+- Todos os endpoints de negócio (`/lancamentos`, `/consolidado`) exigem JWT Bearer token com o claim `comerciante_id`; sem ele a resposta é 403. O comerciante nunca é lido do corpo da requisição
 - Secret configurado via variável de ambiente `JWT_SECRET` — nunca hardcoded; default `dev-secret-change-in-production` funciona localmente
 - Endpoint `/auth/login` de desenvolvimento: aceita qualquer corpo (sem credenciais), devolve token válido por 24h
 - **Por que existe:** Para que o avaliador obtenha um token em 5 segundos sem configurar usuários. É uma concessão deliberada de segurança, documentada explicitamente como tal.

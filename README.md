@@ -121,6 +121,23 @@ TOKEN=$(curl -s -X POST http://localhost:3001/auth/login \
 
 Token válido por 24h. JWT_SECRET padrão: `dev-secret-change-in-production`.
 
+### Comerciante
+
+O sistema é multi-comerciante. O comerciante vem do claim `comerciante_id` do token, **nunca do
+corpo da requisição**: um campo com esse nome no corpo é ignorado, e token sem o claim recebe 403.
+O login de desenvolvimento aceita escolher o comerciante (sem corpo, usa `padrao`):
+
+```powershell
+$TOKEN2 = (Invoke-RestMethod -Method Post http://localhost:3001/auth/login `
+  -ContentType 'application/json' -Body '{"comerciante":"loja-2"}').token
+$H2 = @{ Authorization = "Bearer $TOKEN2" }
+```
+
+A chave `X-Idempotency-Key` vale por comerciante. Identificadores têm de 1 a 64 caracteres entre
+letras, números, hífen e sublinhado.
+
+
+
 ---
 
 ## Usando a API
@@ -171,13 +188,43 @@ Invoke-RestMethod "http://localhost:3001/lancamentos?data=2026-06-15" -Headers $
 
 ### Consolidado
 
-O saldo reflete lançamentos com até ~5s de atraso (consistência eventual via RabbitMQ).
-O campo `source` na resposta indica `"cache"` (Redis) ou `"database"` (Postgres, preencheu o cache).
-Um novo lançamento no mesmo dia invalida a chave `saldo:YYYY-MM-DD` no Redis.
+Cada comerciante enxerga apenas os próprios números. O dia e o acumulado vêm da mesma consulta.
 
 ```powershell
 Invoke-RestMethod "http://localhost:3002/consolidado/2026-06-15" -Headers $H
 ```
+
+```json
+{
+  "source": "database",
+  "comercianteId": "padrao",
+  "data": "2026-06-15",
+  "totalCreditos": "1700.00",
+  "totalDebitos": "350.50",
+  "resultadoDia": "1349.50",
+  "saldoAcumulado": "5120.00",
+  "atualizadoAte": "2026-06-15T18:42:10.123Z"
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `resultadoDia` | Créditos menos débitos da data |
+| `saldoAcumulado` | Soma do resultado de todos os dias do comerciante até a data, inclusive |
+| `atualizadoAte` | Instante do último lançamento já aplicado. Lançamentos mais novos que isso ainda estão a caminho (consistência eventual, em geral poucos segundos). `null` se o comerciante nunca teve lançamento |
+| `source` | `cache` (Redis) ou `database` |
+
+Dia sem movimento não é erro: responde 200 com zeros no dia e o acumulado vigente.
+
+Intervalo, com um item por dia (inclusive vazios) e limite de 92 dias:
+
+```powershell
+Invoke-RestMethod "http://localhost:3002/consolidado?inicio=2026-06-01&fim=2026-06-30" -Headers $H
+```
+
+O cache é por comerciante e data (`saldo:{comerciante}:{data}`, TTL de 60 s). Um lançamento em
+uma data apaga o cache dessa data e das posteriores do comerciante, porque o acumulado delas
+também muda. Decisões e trade-offs no ADR-009.
 
 ---
 
@@ -209,6 +256,10 @@ O que é coberto:
 
 - Lançamento e evento do outbox gravados na mesma transação, e desfeitos juntos quando a gravação do outbox falha
 - Idempotência, inclusive com 10 requisições simultâneas na mesma chave, e 409 para corpo diferente
+- Isolamento entre comerciantes (lançamentos, idempotência, saldo e cache), com o comerciante vindo do token
+- Saldo acumulado correto com lançamento retroativo, que invalida a data e as posteriores mas não as anteriores
+- Dia sem movimento (200 com zeros), `atualizadoAte` e consulta por intervalo com limite de dias
+- Upgrade das migrations sobre dados que já existiam, em banco temporário
 - Relay: nada é marcado como publicado sem confirmação do broker, nem quando a mensagem volta por falta de rota
 - 3 relays concorrentes publicando 200 eventos sem duplicar nem perder
 - Reconexão ao RabbitMQ de verdade, derrubando as conexões no broker
@@ -286,7 +337,8 @@ docker compose --profile observability up -d
 ## Documentação
 
 - `docs/arquitetura.md` — C4 Context/Container/Component com diagramas Mermaid
-- `docs/adrs/`: 8 ADRs cobrindo as decisões de projeto
+- `docs/adrs/`: 9 ADRs cobrindo as decisões de projeto
+- `docs/eventos.md`: contrato do evento e política de versionamento
 - `docs/requisitos.md` — requisitos funcionais e não-funcionais
 - `docs/seguranca.md` — autenticação, rate limiting, modelo de segurança para produção
 - `docs/arquitetura-alvo-cloud.md` — deploy na AWS (ECS, RDS, MQ, ElastiCache)
