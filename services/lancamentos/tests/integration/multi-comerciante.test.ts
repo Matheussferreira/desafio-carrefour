@@ -2,21 +2,21 @@
  * Isolamento entre comerciantes no serviço de lançamentos: o comerciante vem do token,
  * a chave de idempotência vale por comerciante e o evento carrega comercianteId (schema 1.1).
  */
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../../src/app';
-import { config } from '../../src/config';
+import { IdpDeTeste } from '../helpers/idp';
 import { pool } from '../../src/db';
 import { runMigrations } from '../../src/migrations';
 
-const tokenDe = (c: string) => ({
-  Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: c }, config.jwtSecret)}`,
-});
-const loja1 = tokenDe('loja-1');
-const loja2 = tokenDe('loja-2');
+const idp = new IdpDeTeste();
+let loja1: { Authorization: string };
+let loja2: { Authorization: string };
 const corpo = { valor: '80.00', tipo: 'credito', data: '2026-04-01', descricao: 'Venda' };
 
 beforeAll(async () => {
+  await idp.iniciar();
+  loja1 = await idp.cabecalho({ comerciante: 'loja-1' });
+  loja2 = await idp.cabecalho({ comerciante: 'loja-2' });
   await runMigrations(pool);
 });
 
@@ -25,6 +25,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await idp.parar();
   await pool.end();
 });
 

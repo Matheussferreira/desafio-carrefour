@@ -7,13 +7,14 @@ import { isDataReal } from '../domain/data';
 import { lancamentoSchema } from '../domain/lancamento';
 import { ConflitoIdempotenciaError, registrarLancamento } from '../domain/lancamentoService';
 import { sendProblem } from '../http/problem';
+import { exigirEscopo } from '../middleware/auth';
 
 const router = Router();
 
 const COLUNAS = 'id, valor, tipo, descricao, data, created_at';
 
 // POST /lancamentos
-router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', exigirEscopo('lancamentos.write'), async (req: Request, res: Response, next: NextFunction) => {
   const correlationId = (req.headers['x-correlation-id'] as string | undefined) ?? uuidv4();
   const idempotencyKey = req.headers['x-idempotency-key'] as string | undefined;
 
@@ -58,7 +59,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // GET /lancamentos
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', exigirEscopo('lancamentos.read'), async (req: Request, res: Response, next: NextFunction) => {
   const data = req.query.data;
 
   if (data !== undefined && (typeof data !== 'string' || !isDataReal(data))) {

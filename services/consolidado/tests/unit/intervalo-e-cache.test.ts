@@ -1,11 +1,21 @@
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../../src/app';
+import { IdpDeTeste } from '../helpers/idp';
 import { chaveSaldo, chaveUltimoEventoAplicadoEm, chaveVersao } from '../../src/cache/saldoCache';
 import { config } from '../../src/config';
 import { diasNoIntervalo } from '../../src/domain/data';
 
-const auth = { Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: 'loja-a' }, config.jwtSecret)}` };
+const idp = new IdpDeTeste();
+let auth: { Authorization: string };
+
+beforeAll(async () => {
+  await idp.iniciar();
+  auth = await idp.cabecalho({ comerciante: 'loja-a' });
+});
+
+afterAll(async () => {
+  await idp.parar();
+});
 
 describe('diasNoIntervalo', () => {
   it('conta as duas pontas', () => {
@@ -56,18 +66,5 @@ describe('GET /consolidado (intervalo): validação sem tocar no banco', () => {
     const res = await get('?inicio=2026-01-01&fim=2026-12-31');
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ type: '/problems/interval-too-large', maxDias: config.maxDiasIntervalo });
-  });
-});
-
-describe('autenticação por comerciante', () => {
-  it('token sem claim de comerciante: 403', async () => {
-    const semClaim = jwt.sign({ sub: 'x' }, config.jwtSecret);
-    const res = await request(app).get('/consolidado/2026-06-15').set('Authorization', `Bearer ${semClaim}`);
-    expect(res.status).toBe(403);
-  });
-
-  it('login de desenvolvimento emite o claim', async () => {
-    const res = await request(app).post('/auth/login').send({ comerciante: 'loja-3' });
-    expect(jwt.verify(res.body.token, config.jwtSecret)).toMatchObject({ comerciante_id: 'loja-3' });
   });
 });

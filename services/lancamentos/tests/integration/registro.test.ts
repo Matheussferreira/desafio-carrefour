@@ -2,10 +2,9 @@
  * Integração com Postgres real: atomicidade lançamento + outbox, formato da data,
  * idempotência (inclusive concorrente) e contrato HTTP.
  */
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../../src/app';
-import { config } from '../../src/config';
+import { IdpDeTeste } from '../helpers/idp';
 import { pool } from '../../src/db';
 import { runMigrations } from '../../src/migrations';
 import {
@@ -14,8 +13,8 @@ import {
 } from '../../src/domain/lancamentoService';
 
 const M = 'loja-a';
-const tokenDe = (c: string) => ({ Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: c }, config.jwtSecret)}` });
-const auth = tokenDe(M);
+const idp = new IdpDeTeste();
+let auth: { Authorization: string };
 const base = { valor: '120.50', tipo: 'credito' as const, data: '2026-03-10', descricao: 'Venda' };
 
 async function contar(tabela: 'lancamentos' | 'outbox'): Promise<number> {
@@ -24,6 +23,8 @@ async function contar(tabela: 'lancamentos' | 'outbox'): Promise<number> {
 }
 
 beforeAll(async () => {
+  await idp.iniciar();
+  auth = await idp.cabecalho({ comerciante: M });
   await runMigrations(pool);
 });
 
@@ -32,6 +33,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await idp.parar();
   await pool.end();
 });
 

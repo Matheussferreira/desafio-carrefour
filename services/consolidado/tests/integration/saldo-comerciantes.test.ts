@@ -3,20 +3,23 @@
  * ultimoEventoAplicadoEm, evento antigo (1.0) e consulta por intervalo.
  * Cada teste usa comerciantes próprios para não depender da ordem de execução.
  */
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import app from '../../src/app';
 import { chaveSaldo, gravarSaldo, versaoAtual } from '../../src/cache/saldoCache';
 import { consultarDia } from '../../src/domain/saldoQueries';
 import { config } from '../../src/config';
+import { IdpDeTeste } from '../helpers/idp';
 import { pool } from '../../src/db';
 import { getRedis } from '../../src/redis';
 import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEAguardar } from './helpers';
 
-const tokenDe = (c: string) => ({
-  Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: c }, config.jwtSecret)}`,
-});
+const idp = new IdpDeTeste();
+const COMERCIANTES = [
+  'padrao', 'loja-a', 'loja-b', 'loja-vazia', 'loja-c', 'loja-d', 'loja-e', 'loja-f', 'loja-g', 'loja-race', 'loja-race2',
+];
+const cabecalhos = new Map<string, { Authorization: string }>();
+const tokenDe = (c: string): { Authorization: string } => cabecalhos.get(c) as { Authorization: string };
 const consultar = (comerciante: string, data: string) =>
   request(app).get(`/consolidado/${data}`).set(tokenDe(comerciante));
 
@@ -35,11 +38,14 @@ describe('Saldo por comerciante', () => {
   }
 
   beforeAll(async () => {
+    await idp.iniciar();
+    for (const c of COMERCIANTES) cabecalhos.set(c, await idp.cabecalho({ comerciante: c }));
     infra = await iniciarInfra();
     await getRedis().flushdb();
   }, 40_000);
 
   afterAll(async () => {
+    await idp.parar();
     await encerrarInfra(infra);
   });
 

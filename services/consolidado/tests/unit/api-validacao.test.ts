@@ -1,9 +1,18 @@
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../../src/app';
-import { config } from '../../src/config';
+import { IdpDeTeste } from '../helpers/idp';
 
-const auth = { Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: 'loja-a' }, config.jwtSecret)}` };
+const idp = new IdpDeTeste();
+let auth: { Authorization: string };
+
+beforeAll(async () => {
+  await idp.iniciar();
+  auth = await idp.cabecalho();
+});
+
+afterAll(async () => {
+  await idp.parar();
+});
 
 describe('GET /consolidado/:data: data inválida é 400 problem+json, sem tocar no banco', () => {
   it.each(['2026-02-30', '2026-13-01', 'hoje', '2026-6-1'])('data %p', async data => {

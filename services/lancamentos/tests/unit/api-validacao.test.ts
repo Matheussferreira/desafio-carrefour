@@ -1,12 +1,20 @@
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import app from '../../src/app';
-import { config } from '../../src/config';
+import { IdpDeTeste } from '../helpers/idp';
+
+const idp = new IdpDeTeste();
+let auth: { Authorization: string };
+
+beforeAll(async () => {
+  await idp.iniciar();
+  auth = await idp.cabecalho();
+});
+
+afterAll(async () => {
+  await idp.parar();
+});
 
 // Estes cenários terminam na validação, antes de qualquer acesso ao banco.
-const token = jwt.sign({ sub: 'teste', comerciante_id: 'loja-a' }, config.jwtSecret);
-const auth = { Authorization: `Bearer ${token}` };
-
 describe('POST /lancamentos: erros viram 400 problem+json', () => {
   it('data inexistente no calendário', async () => {
     const res = await request(app)

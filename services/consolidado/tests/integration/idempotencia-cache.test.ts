@@ -2,16 +2,16 @@
  * Idempotência do consumidor e invalidação do cache com a chave no formato
  * saldo:{comerciante}:v{versao}:{YYYY-MM-DD}.
  */
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { v4 as uuidv4 } from 'uuid';
 import app from '../../src/app';
-import { config } from '../../src/config';
+import { IdpDeTeste } from '../helpers/idp';
 import { pool } from '../../src/db';
 import { getRedis } from '../../src/redis';
 import { aguardar, encerrarInfra, iniciarInfra, Infra, montarEvento, publicarEAguardar, publicarEvento } from './helpers';
 
-const auth = { Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: 'padrao' }, config.jwtSecret)}` };
+const idp = new IdpDeTeste();
+let auth: { Authorization: string };
 
 async function processado(eventoId: string): Promise<boolean> {
   const { rows } = await pool.query('SELECT 1 FROM eventos_processados WHERE evento_id = $1', [eventoId]);
@@ -22,11 +22,14 @@ describe('Consumidor + cache', () => {
   let infra: Infra;
 
   beforeAll(async () => {
+    await idp.iniciar();
+    auth = await idp.cabecalho({ comerciante: 'padrao' });
     infra = await iniciarInfra();
     await getRedis().flushdb();
   }, 40_000);
 
   afterAll(async () => {
+    await idp.parar();
     await encerrarInfra(infra);
   });
 
