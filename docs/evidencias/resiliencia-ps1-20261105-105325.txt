@@ -1,0 +1,21 @@
+﻿Teste de resiliência, rodada d933eaa6, 2026-11-05 10:53:27
+Quantidade por cenário: 30 lançamentos de 10.00 (cliente erp-loja-2)
+
+=== Cenário A: consolidado parado (data 2044-07-16) ===
+  consolidado parado
+  [OK]    lançamentos aceitos com o consolidado fora do ar: 30 de 30 (esperado 201 em todos)
+  mensagens aguardando na fila do consolidado: 30
+  [OK]    a fila retém os eventos enquanto o consolidado está fora
+  [OK]    saldo convergiu para 300 depois que o consolidado voltou (em 3.4 s)
+
+=== Cenário B: RabbitMQ parado (data 2047-12-09) ===
+  rabbitmq parado
+  [OK]    lançamentos aceitos com o broker fora do ar: 30 de 30 (esperado 201 em todos)
+  eventos pendentes no outbox: 30
+  [OK]    o outbox acumulou os eventos que não puderam ser publicados
+  [OK]    API de lançamentos segue pronta (/ready = 200)
+  [OK]    outbox drenou depois que o broker voltou (em 38.5 s)
+  [OK]    saldo convergiu para 300 (em 0.6 s)
+
+RESULTADO: todas as verificações passaram
+Saída salva em C:\Users\Ease Nexus\Documents\desafio-arquiteto\docs\evidencias\resiliencia-ps1-20261105-105325.txt
