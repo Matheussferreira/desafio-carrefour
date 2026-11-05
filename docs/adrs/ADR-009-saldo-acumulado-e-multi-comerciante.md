@@ -77,11 +77,32 @@ sequenceDiagram
 
 ## Trade-offs
 
-- **Custo da leitura sem cache.** A soma percorre as linhas do comerciante até a data, uma por dia com movimento. Cresce com o histórico, mas é uma varredura de índice sobre poucas linhas por comerciante e, com o cache de 60 s, só acontece a cada TTL por data. Não medimos esse custo com histórico longo; o teste de carga atual usa poucas linhas por comerciante.
+- **Custo da leitura sem cache.** A soma percorre as linhas do comerciante até a data, uma por dia com movimento. Cresce com o histórico, mas só acontece a cada TTL por data, por causa do cache de 60 s. O custo foi medido com 3 anos de histórico (seção abaixo).
 - **Invalidação grossa.** Qualquer evento avança a versão do comerciante inteiro, inclusive para datas anteriores à do lançamento, cujo valor não mudou. É mais invalidação do que o mínimo, e custa leituras ao banco que um `DEL` preciso evitaria. Em troca, a corrida de gravação atrasada deixa de existir e o código fica mais simples. O custo é por comerciante: o cache dos outros não é tocado. Se o histórico consultado de comerciantes muito ativos virar problema, a evolução é combinar a versão com snapshots (abaixo).
 - **Redis fora do ar na hora do evento.** Se o incremento da versão falhar (consumidor sem acesso ao Redis), entradas já em cache continuam sob a versão antiga e podem ser servidas até o TTL de 60 s. O consumidor registra o aviso e o processamento do evento não é desfeito. É o único caminho que ainda admite staleness, limitado ao TTL e restrito à falha do próprio Redis.
 - **Chaves antigas ocupam memória até o TTL.** Cada versão deixa chaves que expiram sozinhas em até 60 s; não há limpeza ativa.
 - **Linha de progresso por comerciante** é um ponto de escrita compartilhado entre os eventos do mesmo comerciante. Como o upsert do saldo já serializa eventos da mesma data, e o consumidor processa uma mensagem por vez por réplica, a contenção é aceitável neste volume.
+
+## Medição com histórico longo (3 anos)
+
+Cenário `tests/load/historico-longo.js`: um comerciante com 1095 dias consecutivos de movimento (1095 créditos e 219 débitos, 2023-01-01 a 2025-12-30), registrados pela API e consolidados pelo fluxo normal. O k6 consulta as 1095 datas distintas a 50 req/s (cada uma lida do banco pela primeira vez, ou seja, cache frio) e confere o acumulado de cada resposta contra o valor calculado em centavos no próprio script: 1101 respostas conferidas, **0 divergências**. O contraponto é a última data repetida a 50 req/s, já em cache.
+
+| Medida | Cache frio (soma até 1095 linhas) | Cache quente |
+|---|---|---|
+| Mediana HTTP | 8,97 ms | 4,76 ms |
+| p95 HTTP | 321,55 ms | 246,73 ms |
+| Falhas | 0% | 0% |
+
+A consulta isolada no PostgreSQL, com `EXPLAIN ANALYZE`, levou **0,24 ms** na primeira data (1 linha), **1,17 ms** no meio do histórico (547 linhas) e **0,84 ms** na última (1095 linhas). Isso é o custo de somar três anos de linhas, e é pequeno.
+
+Como ler os números:
+
+- A diferença entre cache frio e quente na **mediana**, cerca de 4 ms, é o custo de ir ao banco com histórico longo (ida e volta ao PostgreSQL, planejamento e a soma). O custo da soma em si, medido no banco, é da ordem de 1 ms.
+- Os **p95** de 246 ms (cache quente) e 321 ms (cache frio) estão muito acima do que o caminho justifica, e o cache quente, que só lê o Redis, não deveria ficar tão perto do frio. Foram medidos numa máquina de desenvolvimento com outros programas ocupando a CPU do host, e o p95 desta máquina variou muito entre execuções idênticas (ver `docs/evidencias/custo-tracing-ablacao.txt`). Por isso a conclusão sustentada pelos dados é a da mediana e do `EXPLAIN`: **a soma de 3 anos de histórico não é gargalo**, e ambos os p95 ficam abaixo do limite de 500 ms. Não afirmo um p95 de capacidade.
+- A tabela `saldo_diario` do teste é pequena e o planejador escolheu varredura sequencial para as datas mais recentes. Com muitos comerciantes e milhões de linhas, o índice da chave primária `(comerciante_id, data)` é o caminho esperado; esse cenário não foi medido.
+- Os snapshots (abaixo) continuam sendo a evolução para históricos muito maiores ou comerciantes de altíssimo volume, mas esta medição não os justifica agora.
+
+Evidências em `docs/evidencias/`: `k6-historico-saida.txt`, `k6-historico-resumo.json`, `saldo-acumulado-explain.txt`.
 
 ## Alternativas
 

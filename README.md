@@ -241,8 +241,10 @@ o valor antigo depois da invalidação. Decisões e trade-offs no ADR-009.
 ### Unitários
 
 Rodam dentro do container, sem infra externa. Todos importam o código de produção
-(validação, hash de idempotência, interpretação de eventos, cálculo de delta, backoff, retry
-e contrato HTTP dos erros).
+(validação, hash de idempotência, interpretação de eventos, cálculo de delta, backoff, retry,
+contrato HTTP dos erros, segurança do JWT, métricas HTTP e propagação de trace).
+O lint roda com `npm run lint` dentro de cada serviço, e o CI executa lint, tipos, testes e build das imagens.
+A estratégia completa, ligada aos requisitos não funcionais, está em [docs/testes.md](docs/testes.md).
 
 ```powershell
 docker compose run --rm lancamentos npm test
@@ -273,20 +275,36 @@ O que é coberto:
 - 3 relays concorrentes publicando 200 eventos sem duplicar nem perder
 - Reconexão ao RabbitMQ de verdade, derrubando as conexões no broker
 - Consumidor: retry com backoff, DLQ, evento malformado direto para a DLQ, idempotência e invalidação do cache
+- O `traceparent` da requisição é gravado no outbox e sai no cabeçalho da mensagem publicada
+
+### Resiliência, com a stack inteira no ar
+
+```powershell
+docker compose up -d --build --wait
+.	estsesilienciaesiliencia.ps1
+```
+
+No Linux, macOS ou Git Bash: `bash tests/resiliencia/resiliencia.sh`.
+
+Cria 30 lançamentos com o consolidado parado e exige 201 em todos, sobe o consolidado e espera o saldo convergir. Repete derrubando o RabbitMQ: os lançamentos seguem aceitos, o outbox acumula e, na volta do broker, drena. Sai com código diferente de zero se qualquer verificação falhar e salva a saída em `docs/evidencias/`.
 
 ---
 
 ## Teste de carga (k6)
 
-Prova o requisito de 50 req/s em `GET /consolidado/{data}` com < 5% de perda.
-Dois cenários em sequência: cache quente (Redis) e pior caso (Postgres, 60 datas distintas).
-Exit code 0 = todos os thresholds passaram.
+Prova o requisito de 50 req/s em `GET /consolidado/{data}` com menos de 5% de perda, em dois cenários
+em sequência (cache quente e pior caso com 60 datas distintas), e acrescenta um pico de 200 req/s
+acima da cota do limitador, que deve receber 429 com `Retry-After` e nenhum 5xx.
+O código de saída 0 significa que todos os limites passaram.
 
 ```powershell
 docker compose --profile loadtest run --rm k6
 ```
 
-Detalhes, thresholds e saída esperada em `tests/load/README.md`.
+Outros cenários: histórico de 3 anos de um comerciante (`tests/load/historico-longo.js`) e comparação
+entre configurações (`tests/load/ablacao.js`). Resultados reais, incluindo uma execução que falhou
+os limites de latência por saturação da máquina de desenvolvimento, e como lê-los:
+`tests/load/README.md` e `docs/evidencias/`.
 
 ---
 
@@ -334,12 +352,21 @@ O lançamento fica pendente no outbox enquanto o broker está fora e é publicad
 
 ## Observabilidade (profile opcional)
 
-```bash
-docker compose --profile observability up -d
-# Grafana:    http://localhost:3000  (admin/admin)
+```powershell
+docker compose --profile observability up -d --wait
+# Grafana:    http://localhost:3000  (admin/admin), dashboard "Fluxo de Caixa - Overview"
 # Prometheus: http://localhost:9090
+# Jaeger:     http://localhost:16686 (traces)
 # RabbitMQ:   http://localhost:15672 (rabbit/rabbit)
 ```
+
+Para ver um trace, registre um lançamento (`.scriptsseed-demo.ps1`) e procure o serviço `lancamentos` no Jaeger:
+o mesmo trace atravessa a API, o relay e o consolidado. Os logs trazem `traceId`.
+Para conferir no Prometheus que cada painel do dashboard tem dado: `.scriptserificar-dashboard.ps1`.
+
+O tracing custa latência: em três rodadas alternadas, a mediana do consolidado a 50 req/s subiu de cerca de 6 ms para
+cerca de 9 ms com ele ligado (`docs/evidencias/custo-tracing-ablacao.txt`). Para desligar:
+`$env:OTEL_EXPORTER_OTLP_ENDPOINT=; docker compose up -d --force-recreate`.
 
 ---
 
@@ -349,6 +376,9 @@ docker compose --profile observability up -d
 - `docs/adrs/`: 10 ADRs cobrindo as decisões de projeto
 - `docs/eventos.md`: contrato do evento e política de versionamento
 - `docs/requisitos.md` — requisitos funcionais e não-funcionais
+- `docs/testes.md`: pirâmide de testes ligada aos requisitos não funcionais
+- `docs/observabilidade.md`: métricas, logs, tracing e SLOs
+- `docs/evidencias/`: saídas reais de resiliência, k6, trace, dashboard e custos medidos
 - `docs/seguranca.md`: modelo de consumo (OAuth2 e escopos), resiliência da autenticação, limitações e produção
 - `keycloak/realm-caixa.json`: realm de desenvolvimento com os clientes de integração
 - `docs/arquitetura-alvo-cloud.md` — deploy na AWS (ECS, RDS, MQ, ElastiCache)

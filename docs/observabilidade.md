@@ -1,10 +1,12 @@
-# Observabilidade — Estado Atual e Evolução Futura
+# Observabilidade
 
 ## O que está implementado
 
 ### Métricas Prometheus — sempre ligadas
 
 Ambos os serviços expõem `/metrics` sem autenticação, prontos para scraping pelo Prometheus.
+
+As métricas HTTP (`*_http_requests_total` e `*_http_request_duration_seconds`) são alimentadas por um middleware (`src/middleware/metricasHttp.ts`). O rótulo `route` é o padrão da rota (por exemplo `/consolidado/:data`), não a URL real, para não criar uma série por data. As respostas que não chegam a uma rota (401, 429, 404) caem no prefixo de montagem ou em `desconhecida`. O `/metrics` não é medido.
 
 **Lançamentos (`:3001/metrics`):**
 
@@ -15,6 +17,8 @@ Ambos os serviços expõem `/metrics` sem autenticação, prontos para scraping 
 | `lancamentos_created_total` | Counter | `tipo` (`credito`\|`debito`) | Lançamentos criados por tipo |
 | `lancamentos_outbox_events_published_total` | Counter | n/a | Eventos publicados e confirmados pelo broker (processo `lancamentos-relay`) |
 | `lancamentos_outbox_publish_failures_total` | Counter | n/a | Lotes do outbox que falharam (sem confirmação, sem rota ou conexão caída) |
+| `lancamentos_outbox_pendentes` | Gauge | n/a | Eventos no outbox ainda não publicados (calculado a cada scrape, só no processo do relay) |
+| `lancamentos_outbox_idade_mais_antigo_segundos` | Gauge | n/a | Idade do evento pendente mais antigo; 0 quando não há pendentes |
 | `lancamentos_rabbitmq_connected` | Gauge | n/a | 1 quando o relay está conectado ao RabbitMQ |
 | Métricas Node.js default | — | — | Heap, GC, CPU, event loop lag |
 
@@ -27,6 +31,7 @@ Ambos os serviços expõem `/metrics` sem autenticação, prontos para scraping 
 | `consolidado_events_processed_total` | Counter | `tipo, status` | Eventos processados; `status`: `processed`, `skipped`, `dlq`, `invalid` |
 | `consolidado_consumer_retries_total` | Counter | — | Cada vez que `withRetry` chama o callback `onRetry`; uma mensagem que esgota os retries contribui **3** para este contador (não 4 — a última tentativa falha sem callback) |
 | `consolidado_consumer_dlq_total` | Counter | — | Mensagens enviadas à DLQ após esgotar retries; deve ser próximo de zero em operação normal |
+| `consolidado_evento_lag_seconds` | Histogram | n/a | Lag: tempo entre a criação do evento (`createdAt`) e a aplicação ao saldo. Buckets de 50 ms a 300 s |
 | `consolidado_rabbitmq_connected` | Gauge | n/a | 1 quando o consumidor está conectado ao RabbitMQ |
 | Métricas Node.js default | — | — | Heap, GC, CPU, event loop lag |
 
@@ -44,7 +49,9 @@ Todos os logs são JSON estruturado com nível (`info`, `warn`, `error`, `debug`
 {"level":"info","correlationId":"7f3e9c1a","eventoId":"550e8400","data":"2024-01-15","tipo":"credito","valor":"1500.00","msg":"Event processed"}
 ```
 
-Rastrear um lançamento de ponta a ponta (sem tracing distribuído):
+Quando o tracing está ligado, cada linha de log dentro de uma requisição ou de um processamento de evento também traz `traceId` e `spanId`, o que permite pular do log para o trace no Jaeger e vice-versa.
+
+Rastrear um lançamento de ponta a ponta pelo `correlationId`:
 ```bash
 docker compose logs lancamentos | grep "7f3e9c1a"
 docker compose logs consolidado | grep "7f3e9c1a"
@@ -86,76 +93,50 @@ O dashboard **"Fluxo de Caixa — Overview"** é provisionado automaticamente vi
 - Taxa de eventos processados por status (`processed`/`skipped`/`dlq`/`invalid`) — Consolidado
 - Contadores de retries e DLQ do consumer (com thresholds coloridos)
 - Heap Node.js de ambos os serviços
+- Lag do consolidado (p50, p95 e p99), eventos pendentes no outbox e idade do mais antigo
+- Taxa de requisições do consolidado por status e respostas de proteção (401, 403, 413 e 429)
 
 ---
 
-## O que NÃO está implementado — Tracing Distribuído
+## Tracing distribuído (OpenTelemetry)
 
-### Por que não foi incluído neste baseline
+Os dois serviços e o relay exportam traces por OTLP/HTTP. No profile `observability` o Jaeger recebe os spans em memória e a interface fica em http://localhost:16686.
 
-O SDK do OpenTelemetry (`@opentelemetry/sdk-node` + auto-instrumentations) exige inicialização assíncrona antes de qualquer `import` de módulo instrumentado. Isso altera a estrutura do `server.ts` de forma não-trivial, adiciona ~5 dependências novas com risco de conflito de versão, e modifica o bootstrap de startup — área que já tem comportamento crítico (conexão ao banco, ao broker, migrações). O risco de instabilizar o `docker compose up` não justificou o ganho para 2 serviços onde o `correlationId` nos logs já cobre 95% dos casos de diagnóstico.
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant L as lancamentos
+    participant DB as Postgres
+    participant R as lancamentos-relay
+    participant Q as RabbitMQ
+    participant K as consolidado
 
-### Como implementar quando necessário
-
-**1. Instalar dependências em ambos os serviços:**
-```bash
-npm install @opentelemetry/sdk-node \
-            @opentelemetry/auto-instrumentations-node \
-            @opentelemetry/exporter-trace-otlp-grpc
+    C->>L: POST /lancamentos
+    L->>DB: lançamento + outbox (traceparent gravado)
+    L-->>C: 201
+    R->>DB: lê o outbox (traceparent)
+    R->>Q: publica com cabeçalho traceparent
+    Q->>K: entrega a mensagem
+    K->>K: span filho do trace original
 ```
 
-**2. Criar `src/tracing.ts` (carregado ANTES de qualquer import no `server.ts`):**
-```typescript
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
-import { Resource } from '@opentelemetry/resources';
-import { SEMRESATTRS_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
+Como funciona:
 
-const sdk = new NodeSDK({
-  resource: new Resource({
-    [SEMRESATTRS_SERVICE_NAME]: process.env.SERVICE_NAME ?? 'lancamentos',
-  }),
-  traceExporter: new OTLPTraceExporter({
-    url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://jaeger:4317',
-  }),
-  instrumentations: [getNodeAutoInstrumentations()],
-});
+- **Ligar e desligar:** o SDK só inicia quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido (o compose aponta para `http://jaeger:4318`). Sem a variável, o código de tracing vira no-op e nada é exportado. Sem o Jaeger no ar, os spans são descartados.
+- **Instrumentação automática:** HTTP, Express (rotas e handlers) e `pg`. Os endpoints `/health`, `/ready` e `/metrics` não geram spans.
+- **Propagação pelo RabbitMQ:** a instrumentação automática não cobre o salto assíncrono do Outbox, então a propagação é explícita. A requisição grava o `traceparent` (W3C) em `outbox.traceparent`. O relay, que roda depois e em outro processo, cria o span `outbox publicar` como filho desse contexto e publica a mensagem com o cabeçalho `traceparent`. O consolidado lê o cabeçalho e cria o span `consolidado.lancamentos processar` no mesmo trace.
+- **Eventos antigos:** linhas do outbox gravadas antes da migration 004 não têm `traceparent`; o relay inicia um trace novo para elas.
+- **Amostragem:** todos os traces são coletados (padrão do SDK). Em produção, usar `OTEL_TRACES_SAMPLER=parentbased_traceidratio` com `OTEL_TRACES_SAMPLER_ARG` para limitar o volume.
 
-sdk.start();
-process.on('SIGTERM', () => sdk.shutdown());
+Exemplo real de um `POST /lancamentos` atravessando os três processos, coletado do Jaeger: [evidencias/trace-ponta-a-ponta.txt](evidencias/trace-ponta-a-ponta.txt).
+
+Para ver na interface:
+
+```powershell
+docker compose --profile observability up -d --wait
+.scriptsseed-demo.ps1
+# Abra http://localhost:16686, escolha o serviço "lancamentos" e clique em Find Traces
 ```
-
-**3. Modificar `server.ts` para importar tracing primeiro:**
-```typescript
-import './tracing'; // DEVE ser o primeiro import
-import app from './app';
-// ... restante igual
-```
-
-**4. Adicionar Jaeger ao `docker-compose.yml` (no profile `observability`):**
-```yaml
-jaeger:
-  image: jaegertracing/all-in-one:1.58
-  profiles: ["observability"]
-  environment:
-    COLLECTOR_OTLP_ENABLED: "true"
-  ports:
-    - "16686:16686"  # UI
-    - "4317:4317"    # OTLP gRPC
-```
-
-**5. Propagar contexto via AMQP:**
-
-A `AmqplibInstrumentation` do auto-instrumentations injeta e extrai `traceparent`/`tracestate` nos headers da mensagem automaticamente. O span do consumer será filho do span do publisher sem código adicional.
-
-**O que você ganha:**
-
-- Um trace único cobrindo: `POST /lancamentos` → INSERT banco → outbox relay → RabbitMQ publish → consumer → DB upsert → Redis DEL
-- Visibilidade de latência por hop (quanto tempo o evento ficou na fila, quanto tempo o Postgres levou no upsert)
-- Correlação automática com logs via `trace_id` / `span_id` injetados no contexto do pino
-
-**Prioridade:** Alta quando o sistema crescer para 4+ serviços ou quando investigação de latência por `correlationId` nos logs se tornar insuficiente.
 
 ---
 
