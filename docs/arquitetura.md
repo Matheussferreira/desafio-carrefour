@@ -30,9 +30,13 @@ C4Container
     ContainerDb(pg_c, "consolidado_db", "PostgreSQL 16", "Tabelas: saldo_diario (PK comerciante_id + data), comerciante_progresso, eventos_processados")
     Container(mq, "RabbitMQ", "RabbitMQ 3.13", "Exchange: lancamentos.events (topic) + DLX/DLQ")
     Container(redis, "Redis", "Redis 7", "Cache do saldo por comerciante e data, TTL 60s")
+    Container(keycloak, "Keycloak", "Keycloak 26", "Provedor OIDC: emite tokens (client credentials) e publica o JWKS")
 
-    Rel(comerciante, lancamentos, "POST /lancamentos, GET /lancamentos", "HTTPS")
-    Rel(comerciante, consolidado, "GET /consolidado/{data}", "HTTPS")
+    Rel(comerciante, keycloak, "Obtém token (client_id + secret)", "HTTPS")
+    Rel(comerciante, lancamentos, "POST /lancamentos, GET /lancamentos (Bearer)", "HTTPS")
+    Rel(comerciante, consolidado, "GET /consolidado/{data} (Bearer)", "HTTPS")
+    Rel(lancamentos, keycloak, "Busca o JWKS (cache; só na 1ª vez e ao girar a chave)", "HTTP")
+    Rel(consolidado, keycloak, "Busca o JWKS (cache; só na 1ª vez e ao girar a chave)", "HTTP")
     Rel(lancamentos, pg_l, "Lê/Escreve", "SQL")
     Rel(lancamentos, mq, "Publica LancamentoRegistrado (via Outbox Relay)", "AMQP")
     Rel(consolidado, mq, "Consome LancamentoRegistrado; NACK → DLX → DLQ", "AMQP")
@@ -50,7 +54,7 @@ C4Component
 
     Container_Boundary(svc, "Serviço Lancamentos") {
         Component(api, "API Routes", "Express Router", "POST /lancamentos (idempotência via X-Idempotency-Key), GET /lancamentos")
-        Component(auth, "Auth Middleware", "jsonwebtoken", "Valida JWT em todas as rotas de negócio")
+        Component(auth, "Auth Middleware", "jose", "Valida JWT RS256 pelo JWKS do Keycloak (iss, aud, exp), exige escopo por rota e comerciante_id do token")
         Component(relay, "Outbox Relay", "processo lancamentos-relay", "Seleciona o outbox pendente com FOR UPDATE SKIP LOCKED, publica e só marca publicado depois do ack do broker; reconecta com backoff")
         Component(db, "DB Pool", "node-postgres", "Pool de conexões com lancamentos_db; transações ACID para INSERT lancamento + outbox")
         Component(rmq, "RabbitMQ Client", "amqplib", "Conexão persistente; assertExchange + assertQueue na inicialização")
@@ -73,7 +77,7 @@ C4Component
 
     Container_Boundary(svc, "Serviço Consolidado") {
         Component(api_c, "API Routes", "Express Router", "GET /consolidado/{data} com cache-aside e fallback DB")
-        Component(auth_c, "Auth Middleware", "jsonwebtoken", "Valida JWT em todas as rotas de negócio")
+        Component(auth_c, "Auth Middleware", "jose", "Valida JWT RS256 pelo JWKS do Keycloak (iss, aud, exp), exige escopo por rota e comerciante_id do token")
         Component(consumer, "Consumer", "amqplib + withRetry", "prefetch=1; 1 tentativa inicial + 3 retries com backoff 1s/2s/4s; NACK sem requeue após esgotar → DLQ")
         Component(retry, "withRetry", "utility pura", "Executa fn até maxRetries+1 vezes; onRetry callback por cada falha intermediária; retorna Result discriminado")
         Component(db_c, "DB Pool", "node-postgres", "Pool para consolidado_db; transações para INSERT eventos_processados + UPSERT saldo_diario")

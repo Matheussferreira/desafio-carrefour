@@ -54,7 +54,7 @@ graph TD
 
 - Docker Desktop >= 4.x
 - Node 20 ou superior, apenas para rodar os testes fora do container
-- Portas livres: 3001, 3002, 5432, 5672, 6379, 15672
+- Portas livres: 3001, 3002, 5432, 5672, 6379, 8080, 15672
 
 ---
 
@@ -71,10 +71,10 @@ docker compose ps
 Linux ou macOS: `cp .env.example .env` no lugar do `Copy-Item`.
 
 O `--wait` só retorna quando todos os healthchecks passam. `docker compose ps` deve mostrar os
-6 containers (`postgres`, `rabbitmq`, `redis`, `lancamentos`, `lancamentos-relay`,
+7 containers (`postgres`, `rabbitmq`, `redis`, `keycloak`, `lancamentos`, `lancamentos-relay`,
 `consolidado`) como `healthy`. A primeira execução compila as imagens e leva alguns minutos.
 
-Portas: lancamentos `:3001`, consolidado `:3002`, RabbitMQ Management `:15672`.
+Portas: lancamentos `:3001`, consolidado `:3002`, Keycloak `:8080`, RabbitMQ Management `:15672`.
 O `lancamentos-relay` não publica porta no host, para poder ter várias réplicas
 (`docker compose up -d --scale lancamentos-relay=3`).
 
@@ -99,50 +99,56 @@ O `-v` apaga os volumes nomeados (`postgres_data`, `rabbitmq_data`, `grafana_dat
 
 ---
 
-## Autenticação
+## Autenticação e autorização
 
-O endpoint `/auth/login` devolve um token JWT sem verificar credenciais e existe para
-facilitar o teste local. Em produção isso seria substituído por OAuth2.
+As APIs só aceitam **tokens JWT emitidos pelo Keycloak** (OAuth2, fluxo *client credentials*). Não existe
+mais login de desenvolvimento nem segredo compartilhado: os serviços validam a assinatura (RS256) com a
+chave pública do Keycloak, além de issuer, audiência e expiração. Console do Keycloak:
+http://localhost:8080 (usuário `admin`, senha `admin`, somente desenvolvimento).
 
-PowerShell:
+Cada integrador é um cliente do realm `caixa`. O **comerciante e os escopos são amarrados ao cliente**
+pelo administrador do realm; quem pede o token não escolhe em nome de quem age, e o corpo da
+requisição nunca define o comerciante.
+
+| Cliente | Comerciante | Pode |
+|---|---|---|
+| `erp-loja-1` | loja-1 | registrar e listar lançamentos, consultar o consolidado |
+| `erp-loja-2` | loja-2 | o mesmo, para a loja-2 (prova o isolamento) |
+| `bi-loja-1` | loja-1 | somente consultar o consolidado |
+| `contabil-loja-1` | loja-1 | listar lançamentos e consultar o consolidado, sem gravar |
+
+Obtendo um token (PowerShell). O script chama o Keycloak com o segredo de desenvolvimento do cliente:
 
 ```powershell
-$TOKEN = (Invoke-RestMethod -Method Post http://localhost:3001/auth/login `
-  -ContentType 'application/json' -Body '{}').token
+$TOKEN = .\scripts\obter-token.ps1 -Cliente erp-loja-1
 $H = @{ Authorization = "Bearer $TOKEN" }
 ```
 
-bash ou zsh:
+bash, zsh ou Git Bash: `TOKEN=$(bash scripts/obter-token.sh erp-loja-1)`.
 
-```bash
-TOKEN=$(curl -s -X POST http://localhost:3001/auth/login \
-  -H 'Content-Type: application/json' -d '{}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-```
-
-Token válido por 24h. JWT_SECRET padrão: `dev-secret-change-in-production`.
-
-### Comerciante
-
-O sistema é multi-comerciante. O comerciante vem do claim `comerciante_id` do token, **nunca do
-corpo da requisição**: um campo com esse nome no corpo é ignorado, e token sem o claim recebe 403.
-O login de desenvolvimento aceita escolher o comerciante (sem corpo, usa `padrao`):
+O token vale 300 s; depois disso peça outro. Sem token ou com token inválido a resposta é 401, e com
+token válido mas sem o escopo da rota é 403 (`WWW-Authenticate: ... insufficient_scope`):
 
 ```powershell
-$TOKEN2 = (Invoke-RestMethod -Method Post http://localhost:3001/auth/login `
-  -ContentType 'application/json' -Body '{"comerciante":"loja-2"}').token
-$H2 = @{ Authorization = "Bearer $TOKEN2" }
+# A contabilidade lê, mas não grava: 403
+$HC = @{ Authorization = "Bearer $(.\scripts\obter-token.ps1 -Cliente contabil-loja-1)" }
+Invoke-WebRequest -UseBasicParsing -Method Post http://localhost:3001/lancamentos -Headers $HC `
+  -ContentType 'application/json' -Body '{"valor":"1.00","tipo":"credito","data":"2026-06-15"}'
 ```
 
-A chave `X-Idempotency-Key` vale por comerciante. Identificadores têm de 1 a 64 caracteres entre
-letras, números, hífen e sublinhado.
+Se o Keycloak ficar fora do ar, quem já tem token continua sendo atendido (as chaves ficam em cache nos
+serviços); um serviço que acabou de subir e nunca viu as chaves responde 503 com `Retry-After`.
+Detalhes, critérios de onboarding de consumidores e limitações em [docs/seguranca.md](docs/seguranca.md) e
+no [ADR-010](docs/adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
 
-
+A chave `X-Idempotency-Key` vale por comerciante. Identificadores de comerciante têm de 1 a 64 caracteres
+entre letras, números, hífen e sublinhado.
 
 ---
 
 ## Usando a API
 
-Os exemplos usam PowerShell e as variáveis `$TOKEN` e `$H` da seção anterior.
+Os exemplos usam PowerShell e as variáveis `$TOKEN` e `$H` da seção anterior (token do `erp-loja-1`).
 
 ### Regras do contrato
 
@@ -259,6 +265,7 @@ O que é coberto:
 - Lançamento e evento do outbox gravados na mesma transação, e desfeitos juntos quando a gravação do outbox falha
 - Idempotência, inclusive com 10 requisições simultâneas na mesma chave, e 409 para corpo diferente
 - Isolamento entre comerciantes (lançamentos, idempotência, saldo e cache), com o comerciante vindo do token
+- Segurança de consumo: token vencido, assinado por outra chave, de outro issuer ou de outra audiência, HS256 e `alg: none`, escopo insuficiente, Keycloak fora do ar e rotação de chaves
 - Saldo acumulado correto com lançamento retroativo, e corrida simulada entre uma leitura lenta e um evento (o valor antigo nunca é servido)
 - Dia sem movimento (200 com zeros), `ultimoEventoAplicadoEm` e consulta por intervalo com limite de dias
 - Upgrade das migrations sobre dados que já existiam, em banco temporário
@@ -339,10 +346,11 @@ docker compose --profile observability up -d
 ## Documentação
 
 - `docs/arquitetura.md` — C4 Context/Container/Component com diagramas Mermaid
-- `docs/adrs/`: 9 ADRs cobrindo as decisões de projeto
+- `docs/adrs/`: 10 ADRs cobrindo as decisões de projeto
 - `docs/eventos.md`: contrato do evento e política de versionamento
 - `docs/requisitos.md` — requisitos funcionais e não-funcionais
-- `docs/seguranca.md` — autenticação, rate limiting, modelo de segurança para produção
+- `docs/seguranca.md`: modelo de consumo (OAuth2 e escopos), resiliência da autenticação, limitações e produção
+- `keycloak/realm-caixa.json`: realm de desenvolvimento com os clientes de integração
 - `docs/arquitetura-alvo-cloud.md` — deploy na AWS (ECS, RDS, MQ, ElastiCache)
 - `docs/custos.md` — estimativa de custo mensal
 - `tests/load/README.md` — detalhes do teste de carga k6
@@ -361,6 +369,6 @@ Simplificações conscientes, não esquecimentos.
 | Redis | Standalone | Redis Sentinel ou ElastiCache Multi-AZ, failover automático elimina o pico de miss após reinício |
 | Outbox relay | Processo próprio (`lancamentos-relay`), consulta a cada 1s com `FOR UPDATE SKIP LOCKED`; escala por réplicas | CDC via Debezium lendo o WAL, sem SELECT periódico ao banco, se a latência de 1s não bastar |
 | Migrações | Rodam no startup do serviço | Passo separado no pipeline de CI/CD antes de qualquer instância nova subir e evita colisão entre pods |
-| Autenticação | JWT com secret em `.env`, endpoint `/auth/login` sem credenciais | OAuth2/OIDC (Cognito, Keycloak) com tokens de curta duração, o endpoint sem credenciais é uma vulnerabilidade em produção |
+| Identidade | Keycloak em modo desenvolvimento (banco embutido, HTTP), segredos de cliente no `realm-caixa.json` | Keycloak em modo produção com PostgreSQL e TLS, ou Cognito; segredos no Secrets Manager com rotação; `private_key_jwt` ou mTLS para integradores sensíveis |
 | TLS | HTTP puro | TLS em endpoints públicos; mTLS ou service mesh na comunicação interna |
 | Logs | `pino` para stdout | Coleta com Fluentd/Firehose para CloudWatch Logs com retenção e alertas |

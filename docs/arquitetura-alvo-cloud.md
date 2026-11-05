@@ -20,7 +20,7 @@ graph TD
 
     ECS_C -->|cache| REDIS[ElastiCache Redis\nCluster Mode, 3 shards]
 
-    ECS_L --> SM[Secrets Manager\nJWT_SECRET, DB passwords]
+    ECS_L --> SM[Secrets Manager\nsegredos de clientes OIDC, DB passwords]
     ECS_C --> SM
 
     ECS_L --> CW[CloudWatch Logs + Metrics]
