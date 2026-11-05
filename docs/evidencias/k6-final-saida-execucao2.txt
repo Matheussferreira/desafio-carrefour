@@ -1,0 +1,45 @@
+Saída do k6 (tests/load/consolidado.js), execução final 2 de 3, sem as linhas de progresso. Gerado em 2026-11-05 15:07:23.
+Stack padrão: sem o profile observability, tracing desligado, healthcheck do RabbitMQ por porta.
+
+     execution: local
+        script: /scripts/consolidado.js
+        output: -
+     scenarios: (100.00%) 3 scenarios, 550 max VUs, 3m30s max duration (incl. graceful stop):
+              * cache_hit: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheHitScenario, gracefulStop: 30s)
+              * cache_miss: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheMissScenario, startTime: 1m10s, gracefulStop: 30s)
+              * pico_acima_do_limite: 200.00 iterations/s for 40s (maxVUs: 100-400, exec: picoScenario, startTime: 2m20s, gracefulStop: 30s)
+time="2026-11-05T17:59:14Z" level=info msg="[setup] Populando 2026-06-27 (cache_hit)..." source=console
+time="2026-11-05T17:59:15Z" level=info msg="[setup] Populando 60 datas (cache_miss)..." source=console
+time="2026-11-05T17:59:15Z" level=info msg="[setup] Aguardando propagação (SLA ≤ 5s; margem: 7s)..." source=console
+time="2026-11-05T17:59:22Z" level=info msg="[setup] cache_hit OK → {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-06-27\",\"totalCreditos\":\"1450.00\",\"totalDebitos\":\"1500.00\",\"re" source=console
+time="2026-11-05T17:59:22Z" level=info msg="[setup] cache_miss sample OK → 2026-02-01: {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-02-01\",\"totalCreditos" source=console
+time="2026-11-05T17:59:22Z" level=info msg="[setup] cache_miss sample OK → 2026-04-01: {\"source\":\"database\",\"comercianteId\":\"loja-1\",\"data\":\"2026-04-01\",\"totalCreditos" source=console
+     ✓ HTTP 200
+     ✓ latência < 500ms
+     checks.........................: 100.00% ✓ 12002     ✗ 0    
+     data_received..................: 17 MB   88 kB/s
+     data_sent......................: 16 MB   85 kB/s
+     http_req_blocked...............: avg=19.86µs  min=4.5µs   med=7.8µs    max=8.39ms   p(90)=12µs     p(95)=15.5µs  
+     http_req_connecting............: avg=7.62µs   min=0s      med=0s       max=8.24ms   p(90)=0s       p(95)=0s      
+     http_req_duration..............: avg=6.5ms    min=1.11ms  med=3.95ms   max=156.74ms p(90)=9.48ms   p(95)=15.96ms 
+       { expected_response:true }...: avg=6.5ms    min=1.11ms  med=3.95ms   max=156.74ms p(90)=9.48ms   p(95)=15.96ms 
+     ✓ { scenario:cache_hit }.......: avg=5.37ms   min=3.05ms  med=4.45ms   max=41.23ms  p(90)=8.48ms   p(95)=9.71ms  
+     ✓ { scenario:cache_miss }......: avg=4.99ms   min=3ms     med=4.24ms   max=28.1ms   p(90)=7.63ms   p(95)=8.92ms  
+     http_req_failed................: 0.00%   ✓ 0         ✗ 14076
+     ✓ { scenario:cache_hit }.......: 0.00%   ✓ 0         ✗ 3001 
+     ✓ { scenario:cache_miss }......: 0.00%   ✓ 0         ✗ 3000 
+     http_req_receiving.............: avg=200.53µs min=48.31µs med=169.03µs max=18.05ms  p(90)=271µs    p(95)=353.72µs
+     http_req_sending...............: avg=85.31µs  min=18.5µs  med=77.81µs  max=5.28ms   p(90)=117.32µs p(95)=151.15µs
+     http_req_tls_handshaking.......: avg=0s       min=0s      med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=6.21ms   min=946.9µs med=3.69ms   max=156.42ms p(90)=8.98ms   p(95)=15.61ms 
+     http_reqs......................: 14076   74.935472/s
+     iteration_duration.............: avg=7.5ms    min=1.37ms  med=4.38ms   max=7.87s    p(90)=10.1ms   p(95)=16.75ms 
+     iterations.....................: 14002   74.541523/s
+   ✓ non_ok_rate....................: 0.00%   ✓ 0         ✗ 6001 
+   ✓ pico_429_sem_retry_after.......: 0.00%   ✓ 0         ✗ 2001 
+     pico_respostas_200.............: 6000    31.941804/s
+   ✓ pico_respostas_429.............: 2001    10.652592/s
+   ✓ pico_respostas_outras..........: 0       0/s
+     vus............................: 1       min=0       max=25 
+     vus_max........................: 150     min=150     max=150
+exit=0

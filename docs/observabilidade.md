@@ -122,7 +122,8 @@ sequenceDiagram
 
 Como funciona:
 
-- **Ligar e desligar:** o SDK só inicia quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido (o compose aponta para `http://jaeger:4318`). Sem a variável, o código de tracing vira no-op e nada é exportado. Sem o Jaeger no ar, os spans são descartados.
+- **Ligar e desligar:** o SDK só inicia quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido. O compose **não** define por padrão, então o tracing vem desligado e o código de tracing vira no-op. Para ligar com o Jaeger: `docker compose -f docker-compose.yml -f docker-compose.tracing.yml --profile observability up -d --wait`. Com o endpoint definido e sem o Jaeger no ar, os spans são descartados.
+- **Custo:** o tracing acrescenta CPU por requisição. Em medições a 50 req/s o consolidado ficou entre 29% e 65% de CPU com o tracing ligado e o Jaeger no ar, contra cerca de 30% desligado, e em janelas ruins chegou a 145% (`evidencias/regressao-latencia.txt`). Por isso ele vem desligado por padrão. `OTEL_INSTRUMENTACOES` (lista separada por vírgula, padrão `http,express,pg`) permite reduzir os spans.
 - **Instrumentação automática:** HTTP, Express (rotas e handlers) e `pg`. Os endpoints `/health`, `/ready` e `/metrics` não geram spans.
 - **Propagação pelo RabbitMQ:** a instrumentação automática não cobre o salto assíncrono do Outbox, então a propagação é explícita. A requisição grava o `traceparent` (W3C) em `outbox.traceparent`. O relay, que roda depois e em outro processo, cria o span `outbox publicar` como filho desse contexto e publica a mensagem com o cabeçalho `traceparent`. O consolidado lê o cabeçalho e cria o span `consolidado.lancamentos processar` no mesmo trace.
 - **Eventos antigos:** linhas do outbox gravadas antes da migration 004 não têm `traceparent`; o relay inicia um trace novo para elas.

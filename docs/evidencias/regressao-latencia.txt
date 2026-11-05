@@ -1,0 +1,115 @@
+Investigação da degradação de latência do consolidado (dia 2026-11-05)
+Contexto: três execuções do k6 completo falharam (mediana de 0,7 a 3 s no cache_hit, p95 de 4 a 20 s, 4500 a 7500 iterações descartadas, sem 429 no pico).
+Cenário curto usado nas medições: tests/load/curto.js (só cache_hit, 50 req/s, 30 s). Todos os números abaixo são saídas reais, sem arredondar nem reordenar; na seção 1 e na 2 foram omitidos os campos min e max para encurtar.
+
+==============================================================================
+1. Bisect por commit (stack nova por commit, tracing conforme o commit, 2 rodadas)
+   Commits: 98f9fb2 fim da fase 2 | fa194eb fim da fase 3 | 5b5ed52 | c9da582 helmet e limite | 7be182e métricas e OpenTelemetry | 71a4ce2 HEAD da fase 4
+   f53f023 não altera services/ nem o compose; 571b8a5 altera só o compose (volume de evidências e sintaxe da variável do OTel).
+==============================================================================
+== 98f9fb2 | auth=login | run 1
+✓ http_req_duration..............: avg=26.47ms med=6.94ms p(90)=27.17ms  p(95)=61.61ms 
+dropped_iterations.............: 12     0.31342/s
+== 98f9fb2 | auth=login | run 2
+✓ http_req_duration..............: avg=7.39ms     med=5.85ms p(90)=11.36ms  p(95)=15.59ms 
+== fa194eb | auth=keycloak | run 1
+✓ http_req_duration..............: avg=7.37ms   med=4.65ms    p(90)=9.16ms   p(95)=12.03ms 
+== fa194eb | auth=keycloak | run 2
+✓ http_req_duration..............: avg=4.82ms med=4.18ms p(90)=6.69ms   p(95)=8.61ms 
+== 5b5ed52 | auth=keycloak | run 1
+✓ http_req_duration..............: avg=8.84ms med=5.38ms   p(90)=12.55ms  p(95)=19.01ms 
+== 5b5ed52 | auth=keycloak | run 2
+✓ http_req_duration..............: avg=8.28ms med=5.42ms p(90)=15.11ms  p(95)=20.48ms 
+== c9da582 | auth=keycloak | run 1
+✓ http_req_duration..............: avg=21.79ms med=6.98ms   p(90)=32.97ms  p(95)=76.87ms 
+== c9da582 | auth=keycloak | run 2
+✓ http_req_duration..............: avg=89.93ms   med=16.67ms    p(90)=239.67ms p(95)=473.32ms
+dropped_iterations.............: 11     0.278675/s
+== 7be182e | auth=keycloak | run 1
+✓ http_req_duration..............: avg=40.52ms  med=6.52ms    p(90)=75.77ms  p(95)=305.56ms
+== 7be182e | auth=keycloak | run 2
+✓ http_req_duration..............: avg=11.09ms  med=4.6ms p(90)=10.34ms  p(95)=20.38ms 
+== 71a4ce2 | auth=keycloak | run 1
+✓ http_req_duration..............: avg=17.85ms med=5.41ms   p(90)=10.78ms  p(95)=18.31ms 
+dropped_iterations.............: 8      0.197596/s
+== 71a4ce2 | auth=keycloak | run 2
+✓ http_req_duration..............: avg=40.88ms  med=5.92ms    p(90)=17.04ms  p(95)=48.59ms 
+dropped_iterations.............: 27     0.7056/s
+== fim
+
+==============================================================================
+2. Tracing desligado, ligado com Jaeger ausente e ligado com Jaeger no ar (stack principal)
+==============================================================================
+== r1 tracing DESLIGADO | CPU consolidado durante o teste: 30.54%
+tion..............: avg=6.32ms   min=218.97µs med=4.41ms   max=2.19s    p(90)=8.96ms   p(95)=10.64ms 
+== r1 tracing LIGADO, Jaeger ausente | CPU consolidado durante o teste: 32.20%
+tion..............: avg=19.03ms  min=1.59ms med=5.31ms  max=723.45ms p(90)=10.71ms  p(95)=15.57ms 
+dropped_iterations.............: 7      
+== r1 tracing LIGADO, Jaeger no ar | CPU consolidado durante o teste: 53.56%
+tion..............: avg=7.27ms   min=2.5ms   med=5.4ms    max=92.99ms p(90)=11.02ms  p(95)=16.4ms  
+== r2 tracing DESLIGADO | CPU consolidado durante o teste: 40.75%
+tion..............: avg=11.45ms  min=3.15ms  med=5.44ms   max=222.26ms p(90)=19.31ms  p(95)=34.94ms 
+== r2 tracing LIGADO, Jaeger ausente | CPU consolidado durante o teste: 96.17%
+tion..............: avg=149.45ms min=3.81ms med=7.79ms   max=4.83s    p(90)=306.56ms p(95)=934.68ms
+dropped_iterations.............: 57     
+== r2 tracing LIGADO, Jaeger no ar | CPU consolidado durante o teste: 144.57%
+tion..............: avg=362.52ms min=3.83ms med=7.58ms   max=6.15s    p(90)=1.36s    p(95)=2.01s   
+dropped_iterations.............: 136    
+== fim
+
+==============================================================================
+3. Matriz por instrumentação e amostragem (Jaeger no ar). A linha A é com tracing DESLIGADO.
+==============================================================================
+r1 A tracing DESLIGADO                | CPU 95.16% | med=402.22ms p(95)=2.74s  | descartadas 101
+r1 B http+express+pg (padrão atual)   | CPU 80.63% | med=9.46ms p(95)=48.67ms  | descartadas 0
+r1 C http+pg (sem Express)            | CPU 95.27% | med=8.59ms p(95)=31.79ms  | descartadas 0
+r1 D só http                          | CPU 51.10% | med=7.45ms p(95)=154.03ms  | descartadas 0
+r1 E padrão com amostragem 10%        | CPU 51.70% | med=9.74ms p(95)=389.54ms  | descartadas 0
+r2 A tracing DESLIGADO                | CPU 138.47% | med=63.84ms p(95)=955.12ms  | descartadas 55
+r2 B http+express+pg (padrão atual)   | CPU 113.98% | med=47.76ms p(95)=584.83ms  | descartadas 2
+r2 C http+pg (sem Express)            | CPU 128.19% | med=19.94ms p(95)=646.3ms  | descartadas 9
+r2 D só http                          | CPU 120.86% | med=17.5ms p(95)=128.63ms  | descartadas 0
+r2 E padrão com amostragem 10%        | CPU 190.28% | med=22.77ms p(95)=673.77ms  | descartadas 9
+== fim
+
+==============================================================================
+4. Efeito do nível de log (tracing desligado)
+==============================================================================
+r1 LOG_LEVEL=info | med=4.25ms p(95)=8.78ms  | CPU médio do consolidado 43% (amostras: 112.22 24.48 27.16 24.99 27.12 )
+r1 LOG_LEVEL=warn | med=4.23ms p(95)=10.37ms  | CPU médio do consolidado 42% (amostras: 108.24 28.32 26.85 21.65 23.45 )
+r1 LOG_LEVEL=silent | med=4.26ms p(95)=9.49ms  | CPU médio do consolidado 46% (amostras: 108.52 32.13 34.45 33.67 21.48 )
+r2 LOG_LEVEL=info | med=4.2ms p(95)=9.53ms  | CPU médio do consolidado 43% (amostras: 117.79 26.03 21.89 22.45 26.55 )
+r2 LOG_LEVEL=warn | med=4.52ms p(95)=12.78ms  | CPU médio do consolidado 48% (amostras: 110.91 35.09 31.20 28.89 31.93 )
+r2 LOG_LEVEL=silent | med=4.12ms p(95)=9.57ms  | CPU médio do consolidado 41% (amostras: 109.65 20.84 26.19 24.60 25.79 )
+== fim
+
+==============================================================================
+5. Healthcheck novo (nc -z) contra antigo (rabbitmq-diagnostics ping), blocos alternados, e tracing ligado com Jaeger no ar
+==============================================================================
+### A. healthcheck NOVO (nc -z), tracing desligado
+novo   r1 | med=5.21ms p(95)=12.91ms  | descartadas 0 | CPU: consolidado 29.78% rabbit 1.24% keycloak 0.48% postgres 0.09% jaeger 
+novo   r2 | med=4.12ms p(95)=9.64ms  | descartadas 0 | CPU: consolidado 29.25% rabbit 0.37% keycloak 0.43% postgres 1.73% jaeger 
+novo   r3 | med=3.81ms p(95)=9.38ms  | descartadas 0 | CPU: consolidado 30.60% rabbit 0.28% keycloak 0.47% postgres 0.93% jaeger 
+### B. healthcheck ANTIGO (rabbitmq-diagnostics ping), tracing desligado
+antigo r1 | med=4.01ms p(95)=8.93ms  | descartadas 0 | CPU: consolidado 37.19% rabbit 0.23% keycloak 8.10% postgres 7.61% jaeger 
+antigo r2 | med=3.82ms p(95)=8.87ms  | descartadas 0 | CPU: consolidado 25.58% rabbit 1.64% keycloak 0.49% postgres 0.16% jaeger 
+antigo r3 | med=3.72ms p(95)=8.91ms  | descartadas 0 | CPU: consolidado 29.32% rabbit 0.99% keycloak 0.31% postgres 0.11% jaeger 
+### C. healthcheck NOVO de novo, tracing desligado
+novo   r1 | med=3.74ms p(95)=8.77ms  | descartadas 0 | CPU: consolidado 24.70% rabbit 0.34% keycloak 0.37% postgres 0.13% jaeger 
+novo   r2 | med=3.97ms p(95)=8.53ms  | descartadas 0 | CPU: consolidado 33.22% rabbit 1.30% keycloak 9.39% postgres 9.72% jaeger 
+novo   r3 | med=4.23ms p(95)=8.66ms  | descartadas 0 | CPU: consolidado 23.82% rabbit 6.06% keycloak 0.49% postgres 0.13% jaeger 
+### D. healthcheck NOVO, tracing LIGADO no consolidado, Jaeger no ar
+tracing r1 | med=5.49ms p(95)=12.8ms  | descartadas 0 | CPU: consolidado 40.97% rabbit 0.22% keycloak 0.23% postgres 0.27% jaeger 1.59%
+tracing r2 | med=5.01ms p(95)=11.37ms  | descartadas 0 | CPU: consolidado 29.00% rabbit 0.88% keycloak 18.27% postgres 4.44% jaeger 9.75%
+tracing r3 | med=5.1ms p(95)=12.33ms  | descartadas 0 | CPU: consolidado 64.47% rabbit 0.35% keycloak 0.18% postgres 0.28% jaeger 1.13%
+== fim
+
+==============================================================================
+Leitura dos dados
+==============================================================================
+- A degradação foi reproduzida na stack principal: em uma janela de medição, tracing ligado deu p95 de 935 ms (Jaeger ausente) e 2,0 s (Jaeger no ar), com o consolidado a 96% e 145% de CPU. No seu docker stats o consolidado estava a 152%, com o Jaeger recebendo 163 MB.
+- Na mesma janela a configuração com tracing DESLIGADO também degradou em algumas rodadas (p95 de 2,74 s e de 955 ms na matriz; 469 ms na stack nova). Ou seja, o tracing agrava, mas não é a única causa.
+- Nenhum commit do bisect reproduziu a degradação de forma estável: o mesmo commit variou de 8 a 473 ms entre rodadas.
+- O nível de log não muda a CPU nem a latência.
+- Durante as janelas ruins o RabbitMQ aparecia com 113% a 147% de CPU: o healthcheck antigo (rabbitmq-diagnostics ping) sobe uma VM Erlang nova a cada 10 s. Desativando-o, o p95 caiu de 139 a 469 ms para 26, 74 e 30 ms. Mas em um A/B posterior, em blocos alternados, o healthcheck antigo e o novo deram o mesmo resultado (p95 de cerca de 9 ms), então essa associação NÃO está provada como causa.
+- Conclusão honesta: não consegui isolar uma causa única no código. As mudanças feitas reduzem o que é comprovadamente custo (tracing ligado por padrão exportando para um coletor; healthcheck que gasta mais de 100% de CPU em picos), e o k6 completo passou três vezes depois delas. Se a degradação voltar, os arquivos desta pasta mostram como comparar.

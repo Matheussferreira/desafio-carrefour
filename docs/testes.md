@@ -35,9 +35,9 @@ A integração contínua (`.github/workflows/ci.yml`) roda lint, verificação d
 |---|---|---|---|
 | RNF-01 Disponibilidade independente | Lançamentos responde 2xx com o consolidado fora do ar | 30 de 30 lançamentos aceitos com o consolidado parado, e o saldo converge quando ele volta ([resiliência](evidencias/)) | Resiliência |
 | RNF-01 (variante) | Lançamentos continua aceitando com o RabbitMQ fora | 30 de 30 aceitos com o broker parado, `/ready` da API segue 200, o outbox acumula e drena na volta | Resiliência |
-| RNF-02 Throughput e RNF-03 Perda | 50 req/s no consolidado com menos de 5% de perda | k6: `non_ok_rate` e `http_req_failed` em 0,00% nos cenários de cache quente e frio, nas duas execuções registradas ([saídas](evidencias/)) | Carga |
-| RNF-03 (acima da cota) | O excedente é recusado de forma controlada | k6, cenário de pico a 200 req/s: 429 com `Retry-After`, nenhum 5xx | Carga |
-| RNF-04 Latência | p95 abaixo de 500 ms | k6: a execução 1 passou (p95 de 70,6 e 69,7 ms) e a execução 2 **falhou** o limite (p95 de 1,35 e 2,82 s) com a máquina saturada. Evidência parcial: a latência depende do estado da máquina de teste, e a mediana ficou estável (cerca de 6 a 8 ms) | Carga |
+| RNF-02 Throughput e RNF-03 Perda | 50 req/s no consolidado com menos de 5% de perda | k6: `non_ok_rate` em 0,00% nos cenários de cache quente e frio, nas 5 execuções registradas ([saídas](evidencias/)) | Carga |
+| RNF-03 (acima da cota) | O excedente é recusado de forma controlada | k6, cenário de pico a 200 req/s: 2502, 2001 e 2502 respostas 429, todas com `Retry-After`, nenhum 5xx (3 execuções) | Carga |
+| RNF-04 Latência | p95 abaixo de 500 ms | k6 completo, 3 execuções seguidas após a correção: p95 de 9,3 a 9,7 ms (`cache_hit`) e de 8,9 a 9,6 ms (`cache_miss`), código de saída 0 ([saídas](evidencias/)). Antes da correção, 1 execução passou e 1 falhou (p95 de 1,35 e 2,82 s) | Carga |
 | RNF-05 Consistência eventual | Saldo converge em segundos e nunca serve valor anterior ao evento aplicado | Integração: cache versionado, incluindo a corrida de gravação atrasada; resiliência: tempo de convergência medido; métrica `consolidado_evento_lag_seconds` | Integração, resiliência |
 | RNF-06 Sem perda de eventos | Evento só é marcado publicado após o broker confirmar | Integração do relay: sem confirmação (nack) e sem rota mantêm o evento pendente; várias instâncias publicam cada evento uma vez | Integração |
 | RNF-07 Idempotência | Reentrega não duplica saldo | Integração: o mesmo evento aplicado duas vezes soma uma; chave de idempotência por comerciante e 409 com corpo diferente | Integração |
@@ -82,6 +82,6 @@ A integração contínua (`.github/workflows/ci.yml`) roda lint, verificação d
 
 - Não há teste de falha do Redis nem de lentidão do Postgres. O cache é tratado como opcional no código, mas isso não está provado por teste automatizado.
 - Não há teste de carga sobre o lançamentos. O requisito de 50 req/s é do consolidado.
-- Há um teste de carga que falhou na máquina de desenvolvimento (execução 2 em `evidencias/`). Está registrado de propósito: a latência dessa máquina varia muito, e um p95 de capacidade exige ambiente dedicado.
+- **Regressão de latência encontrada e tratada.** Depois da fase 4, o k6 completo passou a falhar (p95 de segundos). Não consegui provar uma causa única: o bisect não achou um commit estável e a degradação também apareceu com o tracing desligado. Foram corrigidos os custos comprovados (tracing desligado por padrão no compose, healthcheck do RabbitMQ por porta) e três execuções seguidas passaram. Investigação completa em `evidencias/regressao-latencia.txt`.
 - Os números de carga são de uma máquina de desenvolvimento com Docker Desktop, com todos os serviços e o Keycloak disputando o mesmo hardware. Servem para comparar cenários entre si, e não como capacidade de produção.
 - O CI foi escrito e validado só quanto à sintaxe do YAML. Ele ainda não rodou no GitHub.

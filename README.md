@@ -303,7 +303,7 @@ docker compose --profile loadtest run --rm k6
 
 Outros cenários: histórico de 3 anos de um comerciante (`tests/load/historico-longo.js`) e comparação
 entre configurações (`tests/load/ablacao.js`). Resultados reais, incluindo uma execução que falhou
-os limites de latência por saturação da máquina de desenvolvimento, e como lê-los:
+os limites de latência antes da correção da degradação encontrada, e como lê-los:
 `tests/load/README.md` e `docs/evidencias/`.
 
 ---
@@ -353,7 +353,10 @@ O lançamento fica pendente no outbox enquanto o broker está fora e é publicad
 ## Observabilidade (profile opcional)
 
 ```powershell
+# Métricas e dashboards
 docker compose --profile observability up -d --wait
+# Métricas, dashboards e traces (liga o tracing nos três processos)
+docker compose -f docker-compose.yml -f docker-compose.tracing.yml --profile observability up -d --wait
 # Grafana:    http://localhost:3000  (admin/admin), dashboard "Fluxo de Caixa - Overview"
 # Prometheus: http://localhost:9090
 # Jaeger:     http://localhost:16686 (traces)
@@ -364,9 +367,7 @@ Para ver um trace, registre um lançamento (`.scriptsseed-demo.ps1`) e procure o
 o mesmo trace atravessa a API, o relay e o consolidado. Os logs trazem `traceId`.
 Para conferir no Prometheus que cada painel do dashboard tem dado: `.scriptserificar-dashboard.ps1`.
 
-O tracing custa latência: em três rodadas alternadas, a mediana do consolidado a 50 req/s subiu de cerca de 6 ms para
-cerca de 9 ms com ele ligado (`docs/evidencias/custo-tracing-ablacao.txt`). Para desligar:
-`$env:OTEL_EXPORTER_OTLP_ENDPOINT=; docker compose up -d --force-recreate`.
+O tracing vem desligado por padrão porque acrescenta CPU por requisição (`docs/observabilidade.md` e `docs/evidencias/regressao-latencia.txt`). Só o segundo comando acima o liga.
 
 ---
 

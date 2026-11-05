@@ -6,6 +6,7 @@ Três scripts. Todos obtêm o token no Keycloak (client credentials) no `setup()
 |---|---|---|
 | `consolidado.js` | 50 req/s com cache quente e frio (requisito de 50 req/s e menos de 5% de perda) e um pico de 200 req/s acima da cota do limitador | `docker compose --profile loadtest run --rm k6` |
 | `historico-longo.js` | 3 anos de lançamentos diários de um comerciante; custo do saldo acumulado e conferência do valor em 1095 datas | `docker compose --profile loadtest run --rm k6 run /scripts/historico-longo.js` |
+| `curto.js` | Só `cache_hit`, 50 req/s por 30 s, para medir rápido ou comparar versões e configurações (`AUTH=login` para os commits anteriores à fase 3) | `docker compose --profile loadtest run --rm k6 run /scripts/curto.js` |
 | `ablacao.js` | 50 req/s na mesma data por 45 s, para comparar configurações da mesma stack (por exemplo com e sem tracing) | `docker compose --profile loadtest run --rm k6 run /scripts/ablacao.js` |
 
 No PowerShell o caminho `/scripts/...` é passado como está. No Git Bash, prefixe o comando com `MSYS_NO_PATHCONV=1` para o caminho não ser convertido para um caminho do Windows.
@@ -41,31 +42,37 @@ Os cenários rodam em sequência para não somar carga.
 docker compose --profile loadtest run --rm -e TEST_DATE=2026-01-15 k6
 ```
 
-## Resultados reais desta máquina (2026-11-05)
+## Resultados reais (2026-11-05)
 
-Resultados em `docs/evidencias/`. Foram duas execuções completas de `consolidado.js`, com a mesma stack e o mesmo código:
+Saídas em `docs/evidencias/`. A tabela mostra as duas execuções que falharam ou oscilaram antes da correção e as três que passaram depois, todas do `consolidado.js` completo:
 
-| | Execução 1 | Execução 2 |
-|---|---|---|
-| Resultado | Passou (código de saída 0) | **Falhou** nos limites de latência (código de saída 99) |
-| `non_ok_rate` | 0,00% | 0,00% |
-| `http_req_failed` | 0,00% | 0,00% |
-| p95 `cache_hit` | 70,6 ms | 1,35 s |
-| p95 `cache_miss` | 69,7 ms | 2,82 s |
-| Mediana `cache_hit` / `cache_miss` | 7,0 / 6,3 ms | 7,7 / 129 ms |
-| Respostas 429 no pico | 2175, todas com `Retry-After` | 0 (o servidor não alcançou a cota no período) |
-| Iterações descartadas | 325 | 2720 |
+| | Antes (execução 1, passou) | Antes (execução 2, falhou) | Depois, execuções 1 / 2 / 3 |
+|---|---|---|---|
+| Código de saída | 0 | 99 | 0 / 0 / 0 |
+| `non_ok_rate` | 0,00% | 0,00% | 0,00% / 0,00% / 0,00% |
+| p95 `cache_hit` | 70,6 ms | 1,35 s | 9,68 / 9,71 / 9,32 ms |
+| p95 `cache_miss` | 69,7 ms | 2,82 s | 9,58 / 8,92 / 9,21 ms |
+| Mediana `cache_hit` | 7,0 ms | 7,7 ms | 4,52 / 4,45 / 4,40 ms |
+| Respostas 429 no pico | 2175 | 0 | 2502 / 2001 / 2502 |
+| 429 sem `Retry-After` | 0 | não se aplica | 0 / 0 / 0 |
 
-A segunda execução também registrou uma duração mínima negativa em uma requisição (relógio da máquina virtual do Docker saltando), sinal de que a máquina estava sob pressão.
+O p95 agregado que o k6 imprime inclui o cenário de pico, que oferece 200 req/s por 40 s de propósito e satura o processo. Os limites de latência valem por cenário (`cache_hit` e `cache_miss`).
 
-Como ler:
+### A degradação encontrada
 
-- Em nenhuma execução houve perda (`non_ok_rate` 0%) nos cenários de 50 req/s. O que variou foi a **latência**, e muito.
-- A máquina é de desenvolvimento, com 8 GB de RAM e outros programas pesados abertos. Durante as medições a CPU do host ficou em 100% e a memória livre chegou a cerca de 340 MB. O RabbitMQ chegou a falhar o healthcheck por demora (mais de 5 s) em um momento. Nessas condições, o resultado do k6 depende mais do estado da máquina que do código.
-- Por isso **não afirmo um p95 de capacidade**. O que os dados sustentam é: zero perda a 50 req/s em ambas, p95 dentro de 500 ms quando a máquina estava menos ocupada, e p95 muito acima quando estava saturada. Para um número de capacidade, rodar em uma máquina dedicada, sem outros programas.
-- O pico acima da cota foi demonstrado na execução 1: o limitador devolveu 429 com `Retry-After` e não houve 5xx. Na execução 2 o servidor ficou lento demais para chegar a 100 req/s no intervalo.
+Depois da fase 4, o `consolidado.js` passou a falhar nos limites de latência (mediana de 0,7 a 3 s e p95 de 4 a 20 s no `cache_hit`, sem 429 no pico porque o serviço não passava de cerca de 25 req/s). A investigação está em `docs/evidencias/regressao-latencia.txt`:
 
-Para um número de latência mais estável nesta máquina, a comparação entre configurações deve ser alternada (ver `docs/evidencias/custo-tracing-ablacao.txt`) e olhar a **mediana**, que variou pouco entre execuções (cerca de 6 ms), enquanto o p95 variou de 75 a 150 ms para a mesma configuração.
+- O bisect de seis commits, cada um em stack nova com o cenário curto (`curto.js`: só `cache_hit`, 50 req/s, 30 s), não mostrou um commit que degrade de forma estável. O mesmo commit variou de 8 a 473 ms de p95 entre rodadas.
+- Na stack principal reproduzi a degradação: com o tracing ligado deu p95 de 935 ms com o Jaeger ausente e de 2,0 s com o Jaeger no ar, com o consolidado a 96% e 145% de CPU (no `docker stats` que você mandou ele estava a 152%). Com o tracing desligado a degradação também apareceu em algumas rodadas, então o tracing agrava, mas não explica tudo.
+- O nível de log não muda a CPU nem a latência.
+- Durante as rodadas ruins o RabbitMQ aparecia com 113% a 147% de CPU: o healthcheck antigo (`rabbitmq-diagnostics ping`) sobe uma VM Erlang nova a cada 10 s. Sem ele, o p95 caiu de 139 a 469 ms para 26, 74 e 30 ms. Em um A/B posterior, em blocos alternados, o healthcheck antigo e o novo deram o mesmo resultado (p95 de cerca de 9 ms), então essa associação não está provada.
+
+**Não consegui provar uma causa única.** O que foi alterado, por ser custo comprovado:
+
+1. O tracing deixou de vir ligado no compose. Sem `OTEL_EXPORTER_OTLP_ENDPOINT`, o SDK nem inicia. Para ligar, use o `docker-compose.tracing.yml` com o profile `observability`. As instrumentações são configuráveis por `OTEL_INSTRUMENTACOES`.
+2. O healthcheck do RabbitMQ virou uma checagem de porta (`nc -z`), que não sobe processo Erlang.
+
+Depois disso, três execuções seguidas do k6 completo passaram. Se a degradação voltar, `curto.js` e os arquivos de `docs/evidencias/` mostram como comparar.
 
 ## historico-longo.js
 
