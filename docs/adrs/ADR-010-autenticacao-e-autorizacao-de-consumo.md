@@ -44,6 +44,15 @@ Dá identidade forte ao cliente, mas não expressa escopos nem o vínculo com o 
 ### Introspecção de token a cada requisição
 Permitiria revogação imediata, ao custo de uma chamada ao provedor por requisição e de acoplar a disponibilidade das APIs ao Keycloak. Com a validação local por JWKS, o Keycloak pode cair sem derrubar quem já tem token. **Descartado.**
 
+### Por que 401, e não 403, para um token com audiência errada
+
+Um token do `bi-loja-1` (audiência `consolidado-api`) enviado ao lançamentos recebe **401**, e não 403. A distinção segue a RFC 6750:
+
+- **401 `invalid_token`**: o token não é válido **para este recurso**. Assinatura, emissor, expiração e **audiência** definem para quem o token foi emitido. Um token cuja audiência não inclui a API chamada é, para essa API, um token inválido, do mesmo modo que um token expirado.
+- **403 `insufficient_scope`**: o token é válido para a API, mas não carrega o escopo que a rota exige. A RFC 6750 reserva esse erro à insuficiência de privilégio.
+
+Tratar audiência errada como 403 faria a API reconhecer e "autorizar" a identidade de um token que não foi emitido para ela, e revelaria a um chamador não autorizado que a credencial é legítima. Com 401 a API se comporta do mesmo jeito para qualquer token que não seja dela. Quem precisa demonstrar o 403 usa o `contabil-loja-1`, que tem as duas audiências e só o escopo de leitura: ao gravar no lançamentos recebe 403 `insufficient_scope`.
+
 ## Consequências
 
 **Positivas:**
