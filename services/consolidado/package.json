@@ -9,8 +9,8 @@
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts",
     "test": "jest --forceExit",
-    "test:unit": "jest --testPathPattern=unit --forceExit",
-    "test:integration": "jest --config jest.integration.config.ts --forceExit"
+    "test:unit": "jest --forceExit",
+    "test:integration": "jest --config jest.integration.config.ts --runInBand --forceExit"
   },
   "dependencies": {
     "amqplib": "^0.10.4",

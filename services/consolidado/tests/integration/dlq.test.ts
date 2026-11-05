@@ -1,177 +1,95 @@
 /**
- * Teste de integração — retry exponencial e Dead Letter Queue.
- *
- * Pré-requisito: infra do docker-compose.integration.yml rodando.
- * Execute via: bash test-integration.sh (na raiz do projeto)
- *
- * O que é testado aqui que os testes unitários NÃO cobrem:
- *  - O broker RabbitMQ realmente aceita o nack e encaminha para a DLQ configurada
- *  - O consumer real chama withRetry na contagem certa de vezes
- *  - A mensagem lida da DLQ pelo broker é o payload original (round-trip completo)
- *  - Uma mensagem válida atravessa o pipeline e não contamina a DLQ
+ * Retry com backoff e Dead Letter Queue contra um RabbitMQ e um Postgres reais.
+ * Pré-requisito: docker-compose.integration.yml no ar (use test-integration.ps1 ou .sh).
  */
-
-import amqp, { Channel, ChannelModel } from 'amqplib';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  connectRabbitMQ,
-  closeRabbitMQ,
-  EXCHANGE,
-  ROUTING_KEY,
-  DLQ,
-} from '../../src/rabbitmq';
 import { pool } from '../../src/db';
-import { runMigrations } from '../../src/migrations';
-import { connectRedis, closeRedis } from '../../src/redis';
-import { startConsumer, stopConsumer } from '../../src/consumer/lancamentosConsumer';
-import { consumerRetriesTotal, consumerDlqTotal } from '../../src/metrics';
+import { DLQ } from '../../src/rabbitmq';
+import { consumerDlqTotal, consumerRetriesTotal } from '../../src/metrics';
+import {
+  aguardar,
+  encerrarInfra,
+  iniciarInfra,
+  Infra,
+  montarEvento,
+  publicarEvento,
+  valorContador,
+} from './helpers';
 
-// Lê o valor atual de um Counter (sem labels) de forma segura
-async function counterValue(counter: {
-  get(): Promise<{ values: Array<{ value: number }> }>;
-}): Promise<number> {
-  const { values } = await counter.get();
-  return values.reduce((sum, v) => sum + v.value, 0);
-}
-
-describe('Integração — retry com backoff e Dead Letter Queue', () => {
-  let pubConn: ChannelModel;
-  let pubCh: Channel;
+describe('Retry com backoff e Dead Letter Queue', () => {
+  let infra: Infra;
 
   beforeAll(async () => {
-    // Migra o schema do consolidado_db no banco de teste
-    await runMigrations(pool);
-
-    // Conecta infra real (aponta para docker-compose.integration.yml via env)
-    await connectRedis();
-    await connectRabbitMQ();
-
-    // Inicia o consumer real — mesmo código que roda em produção
-    await startConsumer();
-
-    // Canal separado para publicar mensagens de teste e ler a DLQ
-    // (não compartilha com o canal interno do consumer)
-    pubConn = await amqp.connect(process.env.RABBITMQ_URL!);
-    pubCh = await pubConn.createChannel();
-  }, 30_000);
+    infra = await iniciarInfra();
+    await infra.pubCh.purgeQueue(DLQ);
+  }, 40_000);
 
   afterAll(async () => {
-    await stopConsumer();
-    try {
-      await pubCh.close();
-    } catch { /* já fechado */ }
-    try {
-      await pubConn.close();
-    } catch { /* já fechado */ }
-    await closeRabbitMQ();
-    await closeRedis();
-    await pool.end();
+    await encerrarInfra(infra);
   });
 
-  it(
-    'tenta exatamente 3 vezes com backoff e envia a mensagem para a DLQ do broker',
-    async () => {
-      const baseRetries = await counterValue(consumerRetriesTotal);
-      const baseDlq = await counterValue(consumerDlqTotal);
+  it('banco indisponível: tenta 3 vezes com backoff e manda a mensagem intacta para a DLQ', async () => {
+    const baseRetries = await valorContador(consumerRetriesTotal);
+    const baseDlq = await valorContador(consumerDlqTotal);
 
-      // Payload que sempre falha: new Decimal('INVALID_FOR_TEST') lança exceção
-      // dentro de processEvent ANTES de qualquer acesso ao banco — falha determinística.
-      const eventoId = uuidv4();
-      const badPayload = {
-        eventoId,
-        schemaVersion: '1',
-        tipo: 'LancamentoRegistrado',
-        correlationId: `inttest-dlq-${eventoId.slice(0, 8)}`,
-        createdAt: new Date().toISOString(),
-        data: {
-          lancamentoId: uuidv4(),
-          valor: 'INVALID_FOR_TEST', // new Decimal('INVALID_FOR_TEST') → throw imediato
-          tipo: 'credito',
-          data: '2024-06-15',
-        },
-      };
+    // Simula uma queda do banco: toda tentativa de obter conexão falha
+    const spy = jest.spyOn(pool, 'connect').mockRejectedValue(new Error('banco indisponível (simulado)') as never);
+    const eventoId = uuidv4();
+    try {
+      publicarEvento(infra.pubCh, montarEvento(eventoId, '2024-06-15', '10.00'));
+      // backoff 1s + 2s + 4s = 7s
+      await aguardar(async () => (await valorContador(consumerDlqTotal)) - baseDlq === 1, 15_000);
+    } finally {
+      spy.mockRestore();
+    }
 
-      pubCh.publish(
-        EXCHANGE,
-        ROUTING_KEY,
-        Buffer.from(JSON.stringify(badPayload)),
-        { persistent: true, messageId: eventoId },
-      );
+    expect((await valorContador(consumerRetriesTotal)) - baseRetries).toBe(3);
 
-      // Backoff configurado no consumer: [1000, 2000, 4000] ms = 7 s total.
-      // Aguarda 9 s para ter folga de ~2 s de overhead.
-      await new Promise<void>(r => setTimeout(r, 9_000));
+    await aguardar(async () => (await infra.pubCh.checkQueue(DLQ)).messageCount === 1, 5_000);
+    const dlqMsg = await infra.pubCh.get(DLQ, { noAck: false });
+    expect(dlqMsg).not.toBe(false);
+    if (dlqMsg !== false) {
+      expect(JSON.parse(dlqMsg.content.toString()).eventoId).toBe(eventoId);
+      infra.pubCh.ack(dlqMsg);
+    }
 
-      // — assert 1: onRetry foi chamado 3 vezes (uma por tentativa intermediária)
-      const afterRetries = await counterValue(consumerRetriesTotal);
-      expect(afterRetries - baseRetries).toBe(3);
+    const { rows } = await pool.query('SELECT 1 FROM eventos_processados WHERE evento_id = $1', [eventoId]);
+    expect(rows).toHaveLength(0);
+  }, 30_000);
 
-      // — assert 2: o counter de DLQ incrementou exatamente 1
-      const afterDlq = await counterValue(consumerDlqTotal);
-      expect(afterDlq - baseDlq).toBe(1);
+  it('evento válido processa sem passar pela DLQ e atualiza o saldo', async () => {
+    const baseDlq = await valorContador(consumerDlqTotal);
+    const eventoId = uuidv4();
 
-      // — assert 3: a mensagem está DE FATO na DLQ do broker (não só no contador)
-      const dlqMsg = await pubCh.get(DLQ, { noAck: false });
-      expect(dlqMsg).not.toBe(false); // false = fila vazia
+    publicarEvento(infra.pubCh, montarEvento(eventoId, '2024-06-15', '375.50'));
+    await aguardar(async () => {
+      const { rows } = await pool.query('SELECT 1 FROM eventos_processados WHERE evento_id = $1', [eventoId]);
+      return rows.length === 1;
+    }, 10_000);
 
-      if (dlqMsg !== false) {
-        const parsed = JSON.parse(dlqMsg.content.toString()) as { eventoId: string };
-        // O payload chegou intacto — é o mesmo eventoId que publicamos
-        expect(parsed.eventoId).toBe(eventoId);
-        pubCh.ack(dlqMsg); // remove da DLQ para não poluir outros testes
-      }
-    },
-    15_000,
-  );
+    expect((await valorContador(consumerDlqTotal)) - baseDlq).toBe(0);
+    expect((await infra.pubCh.checkQueue(DLQ)).messageCount).toBe(0);
 
-  it(
-    'mensagem válida processa sem ir para DLQ e atualiza o saldo no banco',
-    async () => {
-      const baseDlq = await counterValue(consumerDlqTotal);
+    const { rows } = await pool.query<{ saldo: string; data: string }>(
+      'SELECT data, saldo FROM saldo_diario WHERE data = $1',
+      ['2024-06-15'],
+    );
+    expect(rows).toEqual([{ data: '2024-06-15', saldo: '375.50' }]);
+  }, 20_000);
 
-      const eventoId = uuidv4();
-      const validPayload = {
-        eventoId,
-        schemaVersion: '1',
-        tipo: 'LancamentoRegistrado',
-        correlationId: `inttest-valid-${eventoId.slice(0, 8)}`,
-        createdAt: new Date().toISOString(),
-        data: {
-          lancamentoId: uuidv4(),
-          valor: '375.50',
-          tipo: 'credito',
-          data: '2024-06-15',
-        },
-      };
+  it('evento malformado vai direto para a DLQ, sem retries e sem alterar saldo', async () => {
+    const baseRetries = await valorContador(consumerRetriesTotal);
+    const eventoId = uuidv4();
+    // data em formato de timestamp viola o contrato do evento
+    publicarEvento(infra.pubCh, montarEvento(eventoId, '2024-06-16T03:00:00.000Z', '10.00'));
 
-      pubCh.publish(
-        EXCHANGE,
-        ROUTING_KEY,
-        Buffer.from(JSON.stringify(validPayload)),
-        { persistent: true, messageId: eventoId },
-      );
+    await aguardar(async () => (await infra.pubCh.checkQueue(DLQ)).messageCount === 1, 10_000);
 
-      // Processamento normal: sem retries, deve concluir em < 2 s
-      await new Promise<void>(r => setTimeout(r, 3_000));
+    expect((await valorContador(consumerRetriesTotal)) - baseRetries).toBe(0);
+    const { rows } = await pool.query("SELECT 1 FROM saldo_diario WHERE data = '2024-06-16'");
+    expect(rows).toHaveLength(0);
 
-      // — assert 1: DLQ não cresceu
-      const afterDlq = await counterValue(consumerDlqTotal);
-      expect(afterDlq - baseDlq).toBe(0);
-
-      // — assert 2: DLQ está vazia no broker
-      const dlqMsg = await pubCh.get(DLQ, { noAck: true });
-      expect(dlqMsg).toBe(false);
-
-      // — assert 3: saldo foi gravado no banco (prova que o processamento foi end-to-end)
-      const { rows } = await pool.query<{ saldo: string }>(
-        'SELECT saldo FROM saldo_diario WHERE data = $1',
-        ['2024-06-15'],
-      );
-      expect(rows).toHaveLength(1);
-      // O test 1 pode ter deixado parciais no banco? Não — o payload inválido falha
-      // ANTES do pool.connect(), então nenhuma linha foi inserida por ele.
-      expect(parseFloat(rows[0].saldo)).toBeCloseTo(375.5, 2);
-    },
-    10_000,
-  );
+    const msg = await infra.pubCh.get(DLQ, { noAck: false });
+    if (msg !== false) infra.pubCh.ack(msg);
+  }, 20_000);
 });

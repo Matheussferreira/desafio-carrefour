@@ -1,16 +1,18 @@
-import { Router, Request, Response } from 'express';
+import { NextFunction, Request, Response, Router } from 'express';
 import { pool } from '../db';
 import { getRedis } from '../redis';
 import { config } from '../config';
 import { logger } from '../logger';
+import { isDataReal } from '../domain/data';
+import { sendProblem } from '../http/problem';
 
 const router = Router();
 
-router.get('/:data', async (req: Request, res: Response) => {
+router.get('/:data', async (req: Request, res: Response, next: NextFunction) => {
   const { data } = req.params;
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
-    res.status(400).json({ error: 'data deve estar no formato YYYY-MM-DD' });
+  if (!isDataReal(data)) {
+    sendProblem(res, 400, 'validation-error', 'Dados inválidos', 'data deve ser uma data real no formato YYYY-MM-DD.');
     return;
   }
 
@@ -18,15 +20,14 @@ router.get('/:data', async (req: Request, res: Response) => {
 
   try {
     // 1. Tenta servir do cache
-    const redis = getRedis();
-    const cached = await redis.get(cacheKey);
+    const cached = await getRedis().get(cacheKey);
     if (cached) {
       logger.debug({ data, source: 'cache' }, 'Serving from cache');
       res.json({ source: 'cache', ...JSON.parse(cached) });
       return;
     }
   } catch (cacheErr) {
-    // Cache indisponível — fallback no banco sem interromper o fluxo
+    // Cache indisponível: segue para o banco sem interromper o fluxo
     logger.warn({ cacheErr }, 'Redis unavailable, falling back to database');
   }
 
@@ -40,25 +41,23 @@ router.get('/:data', async (req: Request, res: Response) => {
     );
 
     if (rows.length === 0) {
-      res.status(404).json({ error: `Nenhum consolidado encontrado para ${data}` });
+      sendProblem(res, 404, 'not-found', 'Consolidado não encontrado', `Nenhum consolidado encontrado para ${data}.`);
       return;
     }
 
     const result = rows[0];
 
-    // Armazena no cache com TTL
+    // Guarda no cache com TTL; falha aqui não bloqueia a resposta
     try {
-      const redis = getRedis();
-      await redis.setex(cacheKey, config.cacheTtlSeconds, JSON.stringify(result));
+      await getRedis().setex(cacheKey, config.cacheTtlSeconds, JSON.stringify(result));
     } catch {
-      // não bloqueia se cache falhar
+      // ignorado
     }
 
     logger.debug({ data, source: 'database' }, 'Serving from database');
     res.json({ source: 'database', ...result });
   } catch (err) {
-    logger.error({ err }, 'Error fetching consolidado');
-    res.status(500).json({ error: 'Internal server error' });
+    next(err);
   }
 });
 

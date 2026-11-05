@@ -1,6 +1,10 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { config } from './config';
 import { logger } from './logger';
+
+// DATE (oid 1082) volta como "YYYY-MM-DD". O parser padrão cria um Date no fuso do
+// processo, que serializa como timestamp e desloca o dia conforme o TZ.
+types.setTypeParser(1082, valor => valor);
 
 export const pool = new Pool({ connectionString: config.databaseUrl });
 

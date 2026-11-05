@@ -1,4 +1,4 @@
-import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client';
+import { Registry, collectDefaultMetrics, Counter, Gauge, Histogram } from 'prom-client';
 
 export const register = new Registry();
 collectDefaultMetrics({ register });
@@ -34,5 +34,11 @@ export const consumerRetriesTotal = new Counter({
 export const consumerDlqTotal = new Counter({
   name: 'consolidado_consumer_dlq_total',
   help: 'Total messages sent to DLQ after exhausting retries',
+  registers: [register],
+});
+
+export const rabbitmqConnected = new Gauge({
+  name: 'consolidado_rabbitmq_connected',
+  help: '1 quando a conexão do consumidor com o RabbitMQ está de pé, 0 caso contrário',
   registers: [register],
 });

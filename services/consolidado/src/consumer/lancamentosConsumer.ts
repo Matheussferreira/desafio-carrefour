@@ -1,6 +1,6 @@
-import { ConsumeMessage } from 'amqplib';
-import Decimal from 'decimal.js';
-import { getChannel, QUEUE } from '../rabbitmq';
+import type { Channel, ConsumeMessage } from 'amqplib';
+import { QUEUE } from '../rabbitmq';
+import type { ResilientBroker } from '../broker/resilientBroker';
 import { pool } from '../db';
 import { getRedis } from '../redis';
 import { logger } from '../logger';
@@ -10,56 +10,40 @@ import {
   consumerDlqTotal,
 } from '../metrics';
 import { withRetry } from '../utils/retry';
+import { calcularDelta, EventoLancamentoRegistrado, interpretarMensagem } from '../domain/evento';
 
 const MAX_RETRIES = 3;
 // Backoff exponencial: 1s → 2s → 4s
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
-interface LancamentoRegistradoEvent {
-  eventoId: string;
-  schemaVersion: string;
-  tipo: string;
-  correlationId?: string;
-  createdAt: string;
-  data: {
-    lancamentoId: string;
-    valor: string;
-    tipo: 'credito' | 'debito';
-    descricao?: string | null;
-    data: string; // YYYY-MM-DD
-  };
-}
-
-async function processEvent(
-  event: LancamentoRegistradoEvent,
+/**
+ * Aplica o evento ao saldo diário. Idempotente: o mesmo eventoId nunca altera o saldo duas vezes.
+ */
+export async function processEvent(
+  evento: EventoLancamentoRegistrado,
 ): Promise<'processed' | 'skipped'> {
-  const { eventoId, correlationId, data: payload } = event;
+  const { eventoId, correlationId, data: payload } = evento;
   const log = logger.child({ eventoId, correlationId, lancamentoId: payload.lancamentoId });
-
-  const valor = new Decimal(payload.valor);
-  const isCredito = payload.tipo === 'credito';
-  const deltaCredito = isCredito ? valor.toFixed(2) : '0';
-  const deltaDebito = isCredito ? '0' : valor.toFixed(2);
-  const deltaSaldo = isCredito ? valor.toFixed(2) : valor.negated().toFixed(2);
+  const delta = calcularDelta(payload.tipo, payload.valor);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // Idempotência: tenta inserir o evento; rowCount=0 significa já processado
-    const idempResult = await client.query(
+    const idemp = await client.query(
       `INSERT INTO eventos_processados (evento_id) VALUES ($1)
        ON CONFLICT (evento_id) DO NOTHING`,
       [eventoId],
     );
 
-    if (idempResult.rowCount === 0) {
+    if (idemp.rowCount === 0) {
       await client.query('ROLLBACK');
       log.info('Event already processed, skipping');
       return 'skipped';
     }
 
-    // Upsert atômico: SET saldo = saldo + delta — nunca read-modify-write na aplicação
+    // Upsert atômico: o banco soma, a aplicação nunca lê e reescreve o saldo
     await client.query(
       `INSERT INTO saldo_diario (data, total_creditos, total_debitos, saldo, updated_at)
        VALUES ($1, $2, $3, $4, now())
@@ -68,113 +52,139 @@ async function processEvent(
          total_debitos  = saldo_diario.total_debitos  + $3,
          saldo          = saldo_diario.saldo          + $4,
          updated_at     = now()`,
-      [payload.data, deltaCredito, deltaDebito, deltaSaldo],
+      [payload.data, delta.creditos, delta.debitos, delta.saldo],
     );
 
     await client.query('COMMIT');
-
-    // Invalida cache — falha aqui não reverte o processamento do evento
-    try {
-      const redis = getRedis();
-      await redis.del(`saldo:${payload.data}`);
-    } catch (cacheErr) {
-      log.warn({ cacheErr }, 'Failed to invalidate cache (non-fatal)');
-    }
-
-    log.info({ data: payload.data, tipo: payload.tipo, valor: payload.valor }, 'Event processed');
-    return 'processed';
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => undefined);
     throw err;
   } finally {
     client.release();
   }
+
+  // Invalida o cache depois do commit; falha aqui não desfaz o processamento
+  try {
+    await getRedis().del(`saldo:${payload.data}`);
+  } catch (cacheErr) {
+    log.warn({ cacheErr }, 'Failed to invalidate cache (non-fatal)');
+  }
+
+  log.info({ data: payload.data, tipo: payload.tipo, valor: payload.valor }, 'Event processed');
+  return 'processed';
 }
 
-// Estado de graceful shutdown
+// Confirmação pode falhar se o canal caiu no meio do processamento. Sem problema:
+// o broker reentrega e a idempotência descarta a repetição.
+function seguro(acao: () => void): void {
+  try {
+    acao();
+  } catch (err) {
+    logger.warn({ err }, 'Canal indisponível ao confirmar mensagem, o broker vai reentregar');
+  }
+}
+
 let consumerTag: string | null = null;
+let canalAtivo: Channel | null = null;
 let inFlight = 0;
 let shuttingDown = false;
 
-export async function startConsumer(): Promise<void> {
-  const channel = getChannel();
+async function tratar(ch: Channel, msg: ConsumeMessage): Promise<void> {
+  // Durante shutdown: devolve a mensagem para a fila
+  if (shuttingDown) {
+    seguro(() => ch.nack(msg, false, true));
+    return;
+  }
 
-  const { consumerTag: tag } = await channel.consume(
-    QUEUE,
-    async (msg: ConsumeMessage | null) => {
-      if (!msg) return;
+  inFlight++;
+  try {
+    const interpretada = interpretarMensagem(msg.content.toString());
 
-      // Durante shutdown: requeue para não perder mensagem em trânsito
-      if (shuttingDown) {
-        channel.nack(msg, false, true);
-        return;
-      }
+    if (interpretada.tipo === 'invalido') {
+      logger.error({ motivo: interpretada.motivo }, 'Invalid event, sending to DLQ');
+      eventsProcessedTotal.inc({ tipo: 'unknown', status: 'invalid' });
+      consumerDlqTotal.inc();
+      seguro(() => ch.nack(msg, false, false));
+      return;
+    }
 
-      inFlight++;
-      try {
-        // Erros de parse são não-retryáveis
-        let raw: LancamentoRegistradoEvent;
-        try {
-          raw = JSON.parse(msg.content.toString()) as LancamentoRegistradoEvent;
-        } catch (parseErr) {
-          logger.error({ parseErr }, 'Invalid JSON payload, sending to DLQ');
-          eventsProcessedTotal.inc({ tipo: 'unknown', status: 'invalid' });
-          consumerDlqTotal.inc();
-          channel.nack(msg, false, false);
-          return;
-        }
+    if (interpretada.tipo === 'ignorado') {
+      logger.warn({ tipo: interpretada.tipoEvento }, 'Unknown event type, acknowledging');
+      eventsProcessedTotal.inc({ tipo: interpretada.tipoEvento, status: 'invalid' });
+      seguro(() => ch.ack(msg));
+      return;
+    }
 
-        // Tipo desconhecido: ack (forward-compatible, não reprocessar)
-        if (raw.tipo !== 'LancamentoRegistrado') {
-          logger.warn({ tipo: raw.tipo }, 'Unknown event type, acknowledging');
-          eventsProcessedTotal.inc({ tipo: raw.tipo, status: 'invalid' });
-          channel.ack(msg);
-          return;
-        }
+    const { evento } = interpretada;
+    const log = logger.child({ eventoId: evento.eventoId, correlationId: evento.correlationId });
 
-        const log = logger.child({ eventoId: raw.eventoId, correlationId: raw.correlationId });
+    const result = await withRetry(
+      () => processEvent(evento),
+      MAX_RETRIES,
+      RETRY_DELAYS_MS,
+      (err, attempt) => {
+        consumerRetriesTotal.inc();
+        log.warn({ err, attempt, maxRetries: MAX_RETRIES }, 'Processing failed, retrying with backoff');
+      },
+    );
 
-        const result = await withRetry(
-          () => processEvent(raw),
-          MAX_RETRIES,
-          RETRY_DELAYS_MS,
-          (err, attempt) => {
-            consumerRetriesTotal.inc();
-            log.warn({ err, attempt, maxRetries: MAX_RETRIES }, 'Processing failed, retrying with backoff');
-          },
-        );
+    if (result.ok) {
+      eventsProcessedTotal.inc({ tipo: 'LancamentoRegistrado', status: result.value });
+      seguro(() => ch.ack(msg));
+    } else {
+      log.error({ error: result.error }, 'Max retries exceeded, sending to DLQ');
+      eventsProcessedTotal.inc({ tipo: 'LancamentoRegistrado', status: 'dlq' });
+      consumerDlqTotal.inc();
+      seguro(() => ch.nack(msg, false, false));
+    }
+  } finally {
+    inFlight--;
+  }
+}
 
-        if (result.ok) {
-          eventsProcessedTotal.inc({ tipo: 'LancamentoRegistrado', status: result.value });
-          channel.ack(msg);
-        } else {
-          log.error({ error: result.error }, 'Max retries exceeded, sending to DLQ');
-          eventsProcessedTotal.inc({ tipo: 'LancamentoRegistrado', status: 'dlq' });
-          consumerDlqTotal.inc();
-          channel.nack(msg, false, false);
-        }
-      } finally {
-        inFlight--;
-      }
-    },
-  );
-
+/** Registra o consumidor no canal atual (chamado a cada conexão). */
+export async function startConsumer(ch: Channel): Promise<void> {
+  const { consumerTag: tag } = await ch.consume(QUEUE, msg => {
+    if (msg) void tratar(ch, msg);
+  });
   consumerTag = tag;
+  canalAtivo = ch;
   logger.info({ queue: QUEUE }, 'Consumer started');
+}
+
+export function consumerAtivo(): boolean {
+  return consumerTag !== null;
+}
+
+/**
+ * Liga o consumidor ao broker: registra a cada (re)conexão e marca como inativo quando a conexão cai.
+ */
+export function iniciarConsumidor(broker: ResilientBroker<Channel>): void {
+  broker.on('connected', (ch: Channel) => {
+    startConsumer(ch).catch(err => {
+      logger.error({ err }, 'Falha ao registrar o consumidor, reiniciando o canal');
+      ch.close().catch(() => undefined);
+    });
+  });
+  broker.on('disconnected', () => {
+    consumerTag = null;
+    canalAtivo = null;
+  });
 }
 
 export async function stopConsumer(): Promise<void> {
   shuttingDown = true;
 
-  if (consumerTag) {
+  if (consumerTag && canalAtivo) {
     try {
-      await getChannel().cancel(consumerTag);
+      await canalAtivo.cancel(consumerTag);
       logger.info({ consumerTag }, 'Consumer cancelled');
     } catch {
       // Canal pode já estar fechando
     }
-    consumerTag = null;
   }
+  consumerTag = null;
+  canalAtivo = null;
 
   // Aguarda a mensagem em processamento terminar (máx. 8s)
   const deadline = Date.now() + 8_000;
