@@ -32,7 +32,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 
   try {
-    const { criado, lancamento } = await registrarLancamento(pool, parsed.data, { correlationId, idempotencyKey });
+    // O comerciante vem do token (authMiddleware). Campos do corpo com esse nome são ignorados.
+    const comercianteId = req.comercianteId as string;
+    const { criado, lancamento } = await registrarLancamento(pool, comercianteId, parsed.data, {
+      correlationId,
+      idempotencyKey,
+    });
     if (!criado) {
       logger.info({ correlationId, idempotencyKey }, 'Reenvio idempotente, devolvendo o lançamento original');
       res.setHeader('Idempotent-Replayed', 'true');
@@ -62,9 +67,16 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 
   try {
+    const comercianteId = req.comercianteId as string;
     const { rows } = data
-      ? await pool.query(`SELECT ${COLUNAS} FROM lancamentos WHERE data = $1 ORDER BY created_at`, [data])
-      : await pool.query(`SELECT ${COLUNAS} FROM lancamentos ORDER BY created_at DESC LIMIT 100`);
+      ? await pool.query(
+          `SELECT ${COLUNAS} FROM lancamentos WHERE comerciante_id = $1 AND data = $2 ORDER BY created_at`,
+          [comercianteId, data],
+        )
+      : await pool.query(
+          `SELECT ${COLUNAS} FROM lancamentos WHERE comerciante_id = $1 ORDER BY created_at DESC LIMIT 100`,
+          [comercianteId],
+        );
     res.json(rows);
   } catch (err) {
     next(err);

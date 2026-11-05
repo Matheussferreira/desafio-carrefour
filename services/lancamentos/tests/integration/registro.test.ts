@@ -13,7 +13,9 @@ import {
   registrarLancamento,
 } from '../../src/domain/lancamentoService';
 
-const auth = { Authorization: `Bearer ${jwt.sign({ sub: 'teste' }, config.jwtSecret)}` };
+const M = 'loja-a';
+const tokenDe = (c: string) => ({ Authorization: `Bearer ${jwt.sign({ sub: 'teste', comerciante_id: c }, config.jwtSecret)}` });
+const auth = tokenDe(M);
 const base = { valor: '120.50', tipo: 'credito' as const, data: '2026-03-10', descricao: 'Venda' };
 
 async function contar(tabela: 'lancamentos' | 'outbox'): Promise<number> {
@@ -35,7 +37,7 @@ afterAll(async () => {
 
 describe('registro transacional', () => {
   it('grava lançamento e evento no outbox com o mesmo conteúdo', async () => {
-    const { criado, lancamento } = await registrarLancamento(pool, base, { correlationId: 'corr-1' });
+    const { criado, lancamento } = await registrarLancamento(pool, M, base, { correlationId: 'corr-1' });
 
     expect(criado).toBe(true);
     expect(lancamento.data).toBe('2026-03-10');
@@ -62,7 +64,7 @@ describe('registro transacional', () => {
     await pool.query('CREATE TRIGGER trg_falhar_outbox BEFORE INSERT ON outbox FOR EACH ROW EXECUTE FUNCTION falhar_outbox()');
 
     try {
-      await expect(registrarLancamento(pool, base, { correlationId: 'corr-2' })).rejects.toThrow(
+      await expect(registrarLancamento(pool, M, base, { correlationId: 'corr-2' })).rejects.toThrow(
         'falha simulada no outbox',
       );
       expect(await contar('lancamentos')).toBe(0);
@@ -73,7 +75,7 @@ describe('registro transacional', () => {
     }
 
     // Com o defeito removido, o mesmo pedido volta a funcionar
-    const ok = await registrarLancamento(pool, base, { correlationId: 'corr-2' });
+    const ok = await registrarLancamento(pool, M, base, { correlationId: 'corr-2' });
     expect(ok.criado).toBe(true);
     expect(await contar('outbox')).toBe(1);
   });
@@ -81,8 +83,8 @@ describe('registro transacional', () => {
 
 describe('idempotência', () => {
   it('mesma chave e mesmo corpo devolve o original sem criar evento novo', async () => {
-    const primeiro = await registrarLancamento(pool, base, { correlationId: 'a', idempotencyKey: 'k1' });
-    const segundo = await registrarLancamento(pool, { ...base, valor: '120.5' }, { correlationId: 'b', idempotencyKey: 'k1' });
+    const primeiro = await registrarLancamento(pool, M, base, { correlationId: 'a', idempotencyKey: 'k1' });
+    const segundo = await registrarLancamento(pool, M, { ...base, valor: '120.5' }, { correlationId: 'b', idempotencyKey: 'k1' });
 
     expect(segundo.criado).toBe(false);
     expect(segundo.lancamento.id).toBe(primeiro.lancamento.id);
@@ -91,10 +93,10 @@ describe('idempotência', () => {
   });
 
   it('mesma chave com corpo diferente lança conflito e não grava nada', async () => {
-    await registrarLancamento(pool, base, { correlationId: 'a', idempotencyKey: 'k2' });
+    await registrarLancamento(pool, M, base, { correlationId: 'a', idempotencyKey: 'k2' });
 
     await expect(
-      registrarLancamento(pool, { ...base, valor: '999.00' }, { correlationId: 'b', idempotencyKey: 'k2' }),
+      registrarLancamento(pool, M, { ...base, valor: '999.00' }, { correlationId: 'b', idempotencyKey: 'k2' }),
     ).rejects.toBeInstanceOf(ConflitoIdempotenciaError);
 
     expect(await contar('lancamentos')).toBe(1);
@@ -104,7 +106,7 @@ describe('idempotência', () => {
   it('dez requisições simultâneas com a mesma chave geram um único lançamento', async () => {
     const resultados = await Promise.all(
       Array.from({ length: 10 }, (_, i) =>
-        registrarLancamento(pool, base, { correlationId: `c${i}`, idempotencyKey: 'k3' }),
+        registrarLancamento(pool, M, base, { correlationId: `c${i}`, idempotencyKey: 'k3' }),
       ),
     );
 
@@ -115,8 +117,8 @@ describe('idempotência', () => {
   });
 
   it('sem chave, cada requisição cria um lançamento', async () => {
-    await registrarLancamento(pool, base, { correlationId: 'a' });
-    await registrarLancamento(pool, base, { correlationId: 'b' });
+    await registrarLancamento(pool, M, base, { correlationId: 'a' });
+    await registrarLancamento(pool, M, base, { correlationId: 'b' });
     expect(await contar('lancamentos')).toBe(2);
   });
 });

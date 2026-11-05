@@ -4,7 +4,7 @@ import app from '../../src/app';
 import { config } from '../../src/config';
 
 // Estes cenários terminam na validação, antes de qualquer acesso ao banco.
-const token = jwt.sign({ sub: 'teste' }, config.jwtSecret);
+const token = jwt.sign({ sub: 'teste', comerciante_id: 'loja-a' }, config.jwtSecret);
 const auth = { Authorization: `Bearer ${token}` };
 
 describe('POST /lancamentos: erros viram 400 problem+json', () => {

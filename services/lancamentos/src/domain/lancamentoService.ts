@@ -22,15 +22,19 @@ export class ConflitoIdempotenciaError extends Error {
   }
 }
 
+/** Versão do contrato do evento publicado. Política de versionamento em docs/eventos.md. */
+export const SCHEMA_VERSION_EVENTO = '1.1';
+
 const COLUNAS = 'id, valor, tipo, descricao, data, created_at';
 
 /**
  * Grava o lançamento e o evento do outbox na mesma transação.
- * Com chave de idempotência: mesmo corpo devolve o lançamento original,
- * corpo diferente lança ConflitoIdempotenciaError.
+ * A chave de idempotência vale por comerciante. Com a mesma chave: mesmo corpo devolve
+ * o lançamento original, corpo diferente lança ConflitoIdempotenciaError.
  */
 export async function registrarLancamento(
   pool: Pool,
+  comercianteId: string,
   entrada: NovoLancamento,
   ctx: { correlationId: string; idempotencyKey?: string },
 ): Promise<ResultadoRegistro> {
@@ -40,18 +44,19 @@ export async function registrarLancamento(
     await client.query('BEGIN');
 
     const inserido = await client.query<LancamentoRow>(
-      `INSERT INTO lancamentos (valor, tipo, descricao, data, idempotency_key, request_hash)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (idempotency_key) DO NOTHING
+      `INSERT INTO lancamentos (comerciante_id, valor, tipo, descricao, data, idempotency_key, request_hash)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (comerciante_id, idempotency_key) DO NOTHING
        RETURNING ${COLUNAS}`,
-      [entrada.valor, entrada.tipo, entrada.descricao ?? null, entrada.data, ctx.idempotencyKey ?? null, hash],
+      [comercianteId, entrada.valor, entrada.tipo, entrada.descricao ?? null, entrada.data, ctx.idempotencyKey ?? null, hash],
     );
 
     if (inserido.rows.length === 0) {
       // Só há conflito quando existe chave. Reenvio idêntico devolve o original.
       const { rows } = await client.query<LancamentoRow & { request_hash: string | null }>(
-        `SELECT ${COLUNAS}, request_hash FROM lancamentos WHERE idempotency_key = $1`,
-        [ctx.idempotencyKey],
+        `SELECT ${COLUNAS}, request_hash FROM lancamentos
+         WHERE comerciante_id = $1 AND idempotency_key = $2`,
+        [comercianteId, ctx.idempotencyKey],
       );
       await client.query('COMMIT');
       const existente = rows[0];
@@ -67,8 +72,9 @@ export async function registrarLancamento(
     const eventoId = uuidv4();
     const payload = {
       eventoId,
-      schemaVersion: '1.0',
+      schemaVersion: SCHEMA_VERSION_EVENTO,
       tipo: 'LancamentoRegistrado',
+      comercianteId,
       correlationId: ctx.correlationId,
       createdAt: new Date().toISOString(),
       data: {

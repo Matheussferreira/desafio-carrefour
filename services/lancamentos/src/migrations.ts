@@ -40,9 +40,28 @@ const migrations = [
       ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS request_hash TEXT;
     `,
   },
+  {
+    // Multi-comerciante. Linhas existentes ficam com o comerciante padrao e o default é
+    // removido em seguida, para que o código seja obrigado a informar o comerciante.
+    // A chave de idempotência passa a ser única por comerciante. Eventos já gravados no
+    // outbox não são reescritos: o consumidor aceita schemaVersion 1.0 como comerciante padrao.
+    name: '003_multi_comerciante',
+    sql: `
+      ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS comerciante_id TEXT NOT NULL DEFAULT 'padrao';
+      ALTER TABLE lancamentos ALTER COLUMN comerciante_id DROP DEFAULT;
+
+      ALTER TABLE lancamentos DROP CONSTRAINT IF EXISTS lancamentos_idempotency_key_key;
+      ALTER TABLE lancamentos
+        ADD CONSTRAINT lancamentos_comerciante_idempotency_key UNIQUE (comerciante_id, idempotency_key);
+
+      DROP INDEX IF EXISTS idx_lancamentos_data;
+      CREATE INDEX IF NOT EXISTS idx_lancamentos_comerciante_data ON lancamentos (comerciante_id, data);
+    `,
+  },
 ];
 
-export async function runMigrations(pool: Pool): Promise<void> {
+/** Aplica as migrations pendentes. O parâmetro `ate` (nome da migration) existe para testar upgrades. */
+export async function runMigrations(pool: Pool, ate?: string): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS _migrations (
       id       SERIAL      PRIMARY KEY,
@@ -56,10 +75,14 @@ export async function runMigrations(pool: Pool): Promise<void> {
       'SELECT 1 FROM _migrations WHERE name = $1',
       [m.name],
     );
-    if (rowCount && rowCount > 0) continue;
+    if (rowCount && rowCount > 0) {
+      if (ate && m.name === ate) return;
+      continue;
+    }
 
     await pool.query(m.sql);
     await pool.query('INSERT INTO _migrations (name) VALUES ($1)', [m.name]);
     logger.info({ migration: m.name }, 'Migration applied');
+    if (ate && m.name === ate) return;
   }
 }
