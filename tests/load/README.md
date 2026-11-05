@@ -1,10 +1,11 @@
 # Testes de carga (k6)
 
-Três scripts. Todos obtêm o token no Keycloak (client credentials) no `setup()`.
+Cinco scripts. Todos obtêm o token no Keycloak (client credentials) no `setup()`.
 
 | Script | O que mede | Como rodar |
 |---|---|---|
 | `consolidado.js` | 50 req/s com cache quente e frio (requisito de 50 req/s e menos de 5% de perda) e um pico de 200 req/s acima da cota do limitador | `docker compose --profile loadtest run --rm k6` |
+| `limite-429.js` | Prova determinística do 429: sobe o consolidado com `RATE_LIMIT_MAX=300` e envia 700 requisições seguidas; exige 429 com `Retry-After` | `.\tests\load\limite-429.ps1` ou `bash tests/load/limite-429.sh` |
 | `historico-longo.js` | 3 anos de lançamentos diários de um comerciante; custo do saldo acumulado e conferência do valor em 1095 datas | `docker compose --profile loadtest run --rm k6 run /scripts/historico-longo.js` |
 | `curto.js` | Só `cache_hit`, 50 req/s por 30 s, para medir rápido ou comparar versões e configurações (`AUTH=login` para os commits anteriores à fase 3) | `docker compose --profile loadtest run --rm k6 run /scripts/curto.js` |
 | `ablacao.js` | 50 req/s na mesma data por 45 s, para comparar configurações da mesma stack (por exemplo com e sem tracing) | `docker compose --profile loadtest run --rm k6 run /scripts/ablacao.js` |
@@ -21,7 +22,7 @@ Usa o executor `constant-arrival-rate`, que garante a **taxa de chegada** indepe
 |---|---|---|
 | `cache_hit` | 0 a 60 s | Mesma data repetida, lida do Redis depois da primeira requisição |
 | `cache_miss` | 70 a 130 s | 60 datas distintas rotacionando. O cache dessas datas está frio quando o cenário começa (o TTL de 60 s expira antes), então a primeira passagem vai ao PostgreSQL |
-| `pico_acima_do_limite` | 140 a 180 s | 200 req/s por 40 s, acima da cota. Prova que o excedente recebe **429 com `Retry-After`**, sem 5xx. Essas respostas não entram no cálculo de perda |
+| `pico_acima_do_limite` | 140 a 180 s | 200 req/s por 40 s, acima da cota. Prova que só aparecem 200 e 429, todo 429 com `Retry-After` e nenhum 5xx. Se haverá 429 depende do alinhamento da janela do limitador (ver abaixo). Essas respostas não entram no cálculo de perda |
 
 Os cenários rodam em sequência para não somar carga.
 
@@ -32,9 +33,14 @@ Os cenários rodam em sequência para não somar carga.
 | `non_ok_rate` | `rate < 0.05` | Menos de 5% de respostas diferentes de 200 nos cenários de 50 req/s |
 | `http_req_failed{scenario:cache_hit}` e `{scenario:cache_miss}` | `rate < 0.05` | Menos de 5% de erros de rede ou HTTP 400 ou mais |
 | `http_req_duration{scenario:cache_hit}` e `{scenario:cache_miss}` | `p(95) < 500ms` | Limite de latência |
-| `pico_respostas_429` | `count > 0` | O limitador atuou no pico |
 | `pico_429_sem_retry_after` | `rate == 0` | Todo 429 trouxe `Retry-After` |
 | `pico_respostas_outras` | `count == 0` | Nenhum 5xx nem outro status no pico |
+
+O `consolidado.js` não exige mais ao menos um 429 no pico. O limitador usa janela fixa de 1 minuto e 6.000 requisições. Nas três execuções finais o pico recebeu entre 7.885 e 7.943 respostas em 40 s e, conforme a janela virou em relação ao início do pico, houve 2.292, 0 e 713 respostas 429. Exigir 429 ali fazia o teste passar ou falhar pelo alinhamento da janela, não pelo comportamento do serviço. O 429 é provado em `limite-429.js`, que não depende de alinhamento (próxima seção).
+
+### limite-429.js
+
+O limitador do consolidado lê `RATE_LIMIT_MAX` (padrão 6.000 por minuto; valor ausente ou inválido volta ao padrão). O script `limite-429.ps1` (ou `.sh`) sobe o consolidado com `docker-compose.ratelimit.yml`, que define `RATE_LIMIT_MAX=300`, roda o k6 e devolve o serviço ao limite de produção. Um VU envia 700 requisições seguidas (`2 x 300 + 100`), o que leva poucos segundos. Mesmo que a janela vire no meio, cabem no máximo 300 respostas 200 por janela, então o 429 sempre aparece. Os limites: `limite_respostas_429 > 0`, `limite_429_sem_retry_after == 0` e `limite_respostas_outras == 0`. Resultado real: 300 respostas 200 e 400 respostas 429, todas com `Retry-After`, código de saída 0 ([saída](../../docs/evidencias/k6-limite-429-saida.txt)). O limite de produção não foi alterado.
 
 ### Data alternativa para cache_hit
 
@@ -44,19 +50,30 @@ docker compose --profile loadtest run --rm -e TEST_DATE=2026-01-15 k6
 
 ## Resultados reais (2026-11-05)
 
-Saídas em `docs/evidencias/`. A tabela mostra as duas execuções que falharam ou oscilaram antes da correção e as três que passaram depois, todas do `consolidado.js` completo:
+Saídas em `docs/evidencias/`. A tabela compara duas execuções de antes da correção da degradação com as três execuções finais do `consolidado.js` completo (saídas coladas do terminal em `k6-consolidado-saida-final-execucao1.txt` a `3`; o resumo em JSON só existe para a terceira, `k6-consolidado-resumo.json`, porque cada execução sobrescreve o arquivo):
 
-| | Antes (execução 1, passou) | Antes (execução 2, falhou) | Depois, execuções 1 / 2 / 3 |
+| | Antes (execução 1) | Antes (execução 2) | Final, execuções 1 / 2 / 3 |
 |---|---|---|---|
-| Código de saída | 0 | 99 | 0 / 0 / 0 |
+| Código de saída | 0 | 99 | 0 / 99 / 0 |
 | `non_ok_rate` | 0,00% | 0,00% | 0,00% / 0,00% / 0,00% |
-| p95 `cache_hit` | 70,6 ms | 1,35 s | 9,68 / 9,71 / 9,32 ms |
-| p95 `cache_miss` | 69,7 ms | 2,82 s | 9,58 / 8,92 / 9,21 ms |
-| Mediana `cache_hit` | 7,0 ms | 7,7 ms | 4,52 / 4,45 / 4,40 ms |
-| Respostas 429 no pico | 2175 | 0 | 2502 / 2001 / 2502 |
+| p95 `cache_hit` | 70,6 ms | 1,35 s | 64,06 / 10,83 / 141,74 ms |
+| p95 `cache_miss` | 69,7 ms | 2,82 s | 56,00 / 18,60 / 12,50 ms |
+| Mediana `cache_hit` | 7,0 ms | 7,7 ms | 5,74 / 4,88 / 5,24 ms |
+| Maior latência (todos os cenários) | não registrada | não registrada | 3,84 s / 1,49 s / 2,28 s |
+| Respostas 429 no pico | 2175 | 0 | 2292 / 0 / 713 |
 | 429 sem `Retry-After` | 0 | não se aplica | 0 / 0 / 0 |
 
-O p95 agregado que o k6 imprime inclui o cenário de pico, que oferece 200 req/s por 40 s de propósito e satura o processo. Os limites de latência valem por cenário (`cache_hit` e `cache_miss`).
+A execução final 2 saiu com código 99 apenas porque o limite `pico_respostas_429` (ao menos um 429) ainda existia e o pico não recebeu nenhum; todos os outros limites passaram. Esse limite foi removido do `consolidado.js` e substituído pelo `limite-429.js`, como explicado acima.
+
+O p95 agregado que o k6 imprime inclui o cenário de pico, que oferece 200 req/s por 40 s de propósito. Os limites de latência valem por cenário (`cache_hit` e `cache_miss`).
+
+### Capacidade observada por instância
+
+A vazão média de 74 req/s que o k6 imprime (`http_reqs`) é a média de 188 s de execução, com pausas entre os cenários, e não a capacidade do serviço. No cenário de pico as respostas foram 7.885, 7.943 e 7.911 em 40 s, ou seja, cerca de 197 a 199 req/s, todas 200 ou 429 e nenhuma 5xx, com uma instância do consolidado, o k6 e o Keycloak na mesma máquina. Isso mostra uma folga de pelo menos 3,9 vezes sobre os 50 req/s do requisito, mas não é um teste de saturação: o k6 ofereceu 200 req/s e não procurei o ponto de ruptura.
+
+### Picos isolados de latência (limitação conhecida)
+
+Nas três execuções finais a mediana ficou em cerca de 5 ms, mas apareceram requisições isoladas lentas (máximo de 3,84 s, 1,49 s e 2,28 s) e, na execução 3, o p95 do `cache_hit` foi 141,74 ms, com 71 checagens acima de 500 ms. Não identifiquei a causa desses picos e não vou atribuir uma. Os limites de p95 de 500 ms passaram nas três.
 
 ### A degradação encontrada
 
@@ -72,7 +89,7 @@ Depois da fase 4, o `consolidado.js` passou a falhar nos limites de latência (m
 1. O tracing deixou de vir ligado no compose. Sem `OTEL_EXPORTER_OTLP_ENDPOINT`, o SDK nem inicia. Para ligar, use o `docker-compose.tracing.yml` com o profile `observability`. As instrumentações são configuráveis por `OTEL_INSTRUMENTACOES`.
 2. O healthcheck do RabbitMQ virou uma checagem de porta (`nc -z`), que não sobe processo Erlang.
 
-Depois disso, três execuções seguidas do k6 completo passaram. Se a degradação voltar, `curto.js` e os arquivos de `docs/evidencias/` mostram como comparar.
+Depois disso, as latências por cenário voltaram à casa de dezenas de milissegundos ou menos nas três execuções finais. Se a degradação voltar, `curto.js` e os arquivos de `docs/evidencias/` mostram como comparar.
 
 ## historico-longo.js
 
@@ -89,5 +106,6 @@ Resultado e análise no [ADR-009](../../docs/adrs/ADR-009-saldo-acumulado-e-mult
 | `KEYCLOAK_URL` | `http://localhost:8080` | Emissão do token |
 | `CLIENT_ID`, `CLIENT_SECRET` | `erp-loja-1` e o segredo de desenvolvimento | Credencial usada |
 | `TEST_DATE` | `2026-06-27` | Data do cenário de cache quente |
+| `RATE_LIMIT_MAX` | `300` no `limite-429.js` | Só informativo para o script; quem aplica é o serviço (variável do consolidado, definida pelo `docker-compose.ratelimit.yml`) |
 
 O `docker-compose.yml` monta `docs/evidencias` em `/evidencias`, para o k6 gravar o resumo em JSON com `--summary-export`.

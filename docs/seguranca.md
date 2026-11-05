@@ -94,7 +94,7 @@ O `X-Idempotency-Key` é uma string opaca de 1 a 255 caracteres, **escopada por 
 | Serviço | Rota | Limite | Janela | Justificativa |
 |---|---|---|---|---|
 | Lancamentos | `/lancamentos` | 1.200 req | 60 s por IP | 20 req/s, comporta integração ERP em lote sem bloquear uso legítimo |
-| Consolidado | `/consolidado` | 6.000 req | 60 s por IP | 100 req/s, cobre 50 req/s de pico com folga 2x para rajadas |
+| Consolidado | `/consolidado` | 6.000 req (configurável por `RATE_LIMIT_MAX`, usado só no teste do 429) | 60 s por IP | 100 req/s, cobre 50 req/s de pico com folga 2x para rajadas |
 
 `/health`, `/ready` e `/metrics` ficam antes do limitador: um 429 neles poderia fazer o orquestrador matar um container saudável ou interromper o scraping do Prometheus.
 

@@ -1,0 +1,6 @@
+# Override para o teste determinístico do 429 (tests/load/limite-429.js).
+# Baixa o limite do consolidado para 300 req/min; não usar fora do teste.
+services:
+  consolidado:
+    environment:
+      RATE_LIMIT_MAX: "300"

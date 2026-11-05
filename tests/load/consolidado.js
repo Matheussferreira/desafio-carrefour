@@ -19,8 +19,10 @@
  *                            Prova: Postgres sob 50 req/s, sem perdas.
  *
  *   pico_acima_do_limite (T=140–180s) — 200 req/s por 40 s, acima dos 100 req/s da cota
- *                            do limitador (6.000 req/min por IP). Prova que o excedente
- *                            recebe 429 com Retry-After, sem 5xx e sem derrubar o serviço.
+ *                            do limitador (6.000 req/min por IP). Prova que só aparecem
+ *                            200 e 429, todo 429 com Retry-After, sem 5xx. Se haverá 429
+ *                            depende do alinhamento da janela fixa de 1 min, então a
+ *                            existência do 429 é provada em limite-429.js.
  *                            Estas respostas não entram no cálculo de perda do NF-02.
  *
  * Definição de "perda": qualquer resposta ≠ HTTP 200.
@@ -94,8 +96,10 @@ export const options = {
     'http_req_failed{scenario:cache_miss}': ['rate<0.05'],
     'http_req_duration{scenario:cache_hit}':  ['p(95)<500'],
     'http_req_duration{scenario:cache_miss}': ['p(95)<500'],
-    // Acima da cota: tem de haver 429, todos com Retry-After, e nada de 5xx ou outro status
-    pico_respostas_429:        ['count>0'],
+    // Acima da cota: todo 429 tem Retry-After e nada além de 200 e 429 aparece (nenhum 5xx).
+    // Exigir pelo menos um 429 aqui seria não determinístico: o limitador usa janela fixa de 1 min
+    // e o serviço atende o pico sem passar de 6.000 req na mesma janela se ela virar no meio.
+    // O 429 é provado por tests/load/limite-429.js, com o limite baixado por RATE_LIMIT_MAX.
     pico_429_sem_retry_after:  ['rate==0'],
     pico_respostas_outras:     ['count==0'],
   },

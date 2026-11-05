@@ -1,0 +1,62 @@
+Saída colada do terminal (PowerShell) da execução 3 de 3 do consolidado.js. Código de saída 0. O resumo em JSON desta execução é k6-consolidado-resumo.json.
+
+          /\      |‾‾| /‾‾/   /‾‾/
+     /\  /  \     |  |/  /   /  /
+    /  \/    \    |     (   /   ‾‾\
+   /          \   |  |\  \ |  (‾)  |
+  / __________ \  |__| \__\ \_____/ .io
+
+     execution: local
+        script: /scripts/consolidado.js
+        output: -
+
+     scenarios: (100.00%) 3 scenarios, 550 max VUs, 3m30s max duration (incl.graceful stop):
+              * cache_hit: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec:cacheHitScenario, gracefulStop: 30s)
+              * cache_miss: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheMissScenario, startTime: 1m10s, gracefulStop: 30s)
+              * pico_acima_do_limite: 200.00 iterations/s for 40s (maxVUs: 100-400, exec: picoScenario, startTime: 2m20s, gracefulStop: 30s)
+
+INFO[0002] [setup] Populando 2026-06-27 (cache_hit)...   source=console
+INFO[0002] [setup] Populando 60 datas (cache_miss)...    source=console
+INFO[0003] [setup] Aguardando propagação (SLA ≤ 5s; margem: 7s)...  source=console
+INFO[0010] [setup] cache_hit OK → {"source":"database","comercianteId":"loja-1","data":"2026-06-27","totalCreditos":"4250.00","totalDebitos":"4500.00","resource=console
+INFO[0010] [setup] cache_miss sample OK → 2026-02-01: {"source":"database","comercianteId":"loja-1","data":"2026-02-01","totalCreditos  source=console
+INFO[0010] [setup] cache_miss sample OK → 2026-04-01: {"source":"database","comercianteId":"loja-1","data":"2026-04-01","totalCreditos  source=console
+
+     ✓ HTTP 200
+     ✗ latência < 500ms
+      ↳  98% — ✓ 5877 / ✗ 71
+
+     checks.........................: 99.40% ✓ 11825     ✗ 71
+     data_received..................: 17 MB  88 kB/s
+     data_sent......................: 16 MB  84 kB/s
+     dropped_iterations.............: 142    0.75433/s
+     http_req_blocked...............: avg=42.45µs  min=2µs      med=8.8µs    max=92.88ms  p(90)=13.2µs   p(95)=24.3µs
+     http_req_connecting............: avg=17.79µs  min=0s       med=0s       max=25.77ms  p(90)=0s       p(95)=0s
+     http_req_duration..............: avg=76.14ms  min=1.2ms    med=6.78ms   max=2.28s    p(90)=228.38ms p(95)=521.66ms
+       { expected_response:true }...: avg=76.14ms  min=1.2ms    med=6.78ms   max=2.28s    p(90)=228.38ms p(95)=521.66ms
+     ✓ { scenario:cache_hit }.......: avg=41.68ms  min=2.99ms   med=5.24ms   max=2.28s    p(90)=49.69ms  p(95)=141.74ms
+     ✓ { scenario:cache_miss }......: avg=6.22ms   min=2.85ms   med=4.92ms   max=103.73ms p(90)=8.42ms   p(95)=12.5ms
+     http_req_failed................: 0.00%  ✓ 0         ✗ 13933
+     ✓ { scenario:cache_hit }.......: 0.00%  ✓ 0         ✗ 2948
+     ✓ { scenario:cache_miss }......: 0.00%  ✓ 0         ✗ 3000
+     http_req_receiving.............: avg=272.9µs  min=26µs     med=176.93µs max=211.76ms p(90)=281.25µs p(95)=403.63µs
+     http_req_sending...............: avg=141.67µs min=8.5µs    med=78.71µs  max=554.39ms p(90)=124.13µs p(95)=165.76µs
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       max=0s       p(90)=0s       p(95)=0s
+     http_req_waiting...............: avg=75.72ms  min=984.35µs med=6.43ms   max=2.28s    p(90)=228.2ms  p(95)=521.14ms
+     http_reqs......................: 13933  74.014693/s
+     iteration_duration.............: avg=77.66ms  min=1.45ms   med=7.34ms   max=8.26s    p(90)=231.76ms p(95)=523.64ms
+     iterations.....................: 13859  73.621591/s
+   ✓ non_ok_rate....................: 0.00%  ✓ 0         ✗ 5948
+   ✓ pico_429_sem_retry_after.......: 0.00%  ✓ 0         ✗ 713
+     pico_respostas_200.............: 7198   38.237118/s
+   ✓ pico_respostas_429.............: 713    3.787589/s
+   ✓ pico_respostas_outras..........: 0      0/s
+     vus............................: 9      min=0       max=147
+     vus_max........................: 205    min=150     max=205
+
+
+running (3m08.2s), 000/205 VUs, 13859 complete and 0 interrupted iterations
+cache_hit            ✓ [=============] 000/053 VUs  1m0s  50.00 iters/s
+cache_miss           ✓ [=============] 000/050 VUs  1m0s  50.00 iters/s
+pico_acima_do_limite ✓ [=============] 000/152 VUs  40s   200.00 iters/s
+EXIT 0

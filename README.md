@@ -294,16 +294,24 @@ Cria 30 lançamentos com o consolidado parado e exige 201 em todos, sobe o conso
 
 Prova o requisito de 50 req/s em `GET /consolidado/{data}` com menos de 5% de perda, em dois cenários
 em sequência (cache quente e pior caso com 60 datas distintas), e acrescenta um pico de 200 req/s
-acima da cota do limitador, que deve receber 429 com `Retry-After` e nenhum 5xx.
+acima da cota do limitador, em que só podem aparecer 200 e 429, todo 429 com `Retry-After` e nenhum 5xx.
 O código de saída 0 significa que todos os limites passaram.
 
 ```powershell
 docker compose --profile loadtest run --rm k6
 ```
 
+Para provar o 429 de forma determinística, baixe o limite do consolidado para 300 por minuto (variável `RATE_LIMIT_MAX`), envie uma rajada e volte ao limite de produção:
+
+```powershell
+.\tests\load\limite-429.ps1
+```
+
+No Git Bash: `bash tests/load/limite-429.sh`.
+
 Outros cenários: histórico de 3 anos de um comerciante (`tests/load/historico-longo.js`) e comparação
 entre configurações (`tests/load/ablacao.js`). Resultados reais, incluindo uma execução que falhou
-os limites de latência antes da correção da degradação encontrada, e como lê-los:
+os limites de latência antes da correção da degradação encontrada, a capacidade observada e os picos isolados de latência que ficaram sem causa identificada:
 `tests/load/README.md` e `docs/evidencias/`.
 
 ---

@@ -1,0 +1,184 @@
+ Image desafio-arquiteto-consolidado Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 641B 0.0s done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 275B 0.0s done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/node:20-alpine
+#3 DONE 1.5s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 DONE 0.0s
+
+#6 [1/9] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+#6 resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 0.1s done
+#6 DONE 0.1s
+
+#5 [internal] load build context
+#5 transferring context: 2.68kB 1.5s done
+#5 DONE 1.5s
+
+#7 [8/9] COPY tests ./tests
+#7 CACHED
+
+#8 [7/9] COPY src ./src
+#8 CACHED
+
+#9 [2/9] WORKDIR /app
+#9 CACHED
+
+#10 [3/9] COPY package*.json ./
+#10 CACHED
+
+#11 [4/9] RUN npm install --prefer-offline
+#11 CACHED
+
+#12 [5/9] COPY tsconfig.json ./
+#12 CACHED
+
+#13 [6/9] COPY jest.config.ts ./
+#13 CACHED
+
+#14 [9/9] RUN npm run build
+#14 CACHED
+
+#15 exporting to image
+#15 exporting layers 0.0s done
+#15 exporting manifest sha256:69316d06a8965d222652e435503945916fc95b5bbde7892e2b07968178370b5d done
+#15 exporting config sha256:1ad3d5137f4c2d3fe96cfd0f19f1943cabf447bc18b071b87dc757f0a1e4cb10
+#15 exporting config sha256:1ad3d5137f4c2d3fe96cfd0f19f1943cabf447bc18b071b87dc757f0a1e4cb10 0.0s done
+#15 exporting attestation manifest sha256:fa02cdfd88af77eaa7774e82d49adc1c15ff0bf21c5480e7838b5ac4b0350bfc 0.1s done
+#15 exporting manifest list sha256:40cbcacaef12250133e84d6eb5c7800522701daa782217ebc8a67cea69f41226
+#15 exporting manifest list sha256:40cbcacaef12250133e84d6eb5c7800522701daa782217ebc8a67cea69f41226 0.0s done
+#15 naming to docker.io/library/desafio-arquiteto-consolidado:latest done
+#15 unpacking to docker.io/library/desafio-arquiteto-consolidado:latest 0.0s done
+#15 DONE 0.3s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.1s
+ Image desafio-arquiteto-consolidado Built 
+ Container desafio-arquiteto-redis-1 Running 
+ Container desafio-arquiteto-rabbitmq-1 Running 
+ Container desafio-arquiteto-postgres-1 Running 
+ Container desafio-arquiteto-consolidado-1 Recreate 
+ Container desafio-arquiteto-consolidado-1 Recreated 
+ Container desafio-arquiteto-rabbitmq-1 Waiting 
+ Container desafio-arquiteto-redis-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-rabbitmq-1 Healthy 
+ Container desafio-arquiteto-redis-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Starting 
+ Container desafio-arquiteto-consolidado-1 Started 
+ Container desafio-arquiteto-redis-1 Waiting 
+ Container desafio-arquiteto-consolidado-1 Waiting 
+ Container desafio-arquiteto-rabbitmq-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-redis-1 Healthy 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-rabbitmq-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Healthy 
+ Container desafio-arquiteto-rabbitmq-1 Running 
+ Container desafio-arquiteto-lancamentos-1 Running 
+ Container desafio-arquiteto-redis-1 Running 
+ Container desafio-arquiteto-keycloak-1 Running 
+ Container desafio-arquiteto-consolidado-1 Running 
+ Container desafio-arquiteto-postgres-1 Running 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-rabbitmq-1 Waiting 
+ Container desafio-arquiteto-redis-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-redis-1 Healthy 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-rabbitmq-1 Healthy 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-keycloak-1 Waiting 
+ Container desafio-arquiteto-lancamentos-1 Waiting 
+ Container desafio-arquiteto-consolidado-1 Waiting 
+ Container desafio-arquiteto-lancamentos-1 Healthy 
+ Container desafio-arquiteto-keycloak-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Healthy 
+ Container desafio-arquiteto-k6-run-08f7dfab7617 Creating 
+ Container desafio-arquiteto-k6-run-08f7dfab7617 Created 
+
+          /\      |‾‾| /‾‾/   /‾‾/   
+     /\  /  \     |  |/  /   /  /    
+    /  \/    \    |     (   /   ‾‾\  
+   /          \   |  |\  \ |  (‾)  | 
+  / __________ \  |__| \__\ \_____/ .io
+
+     execution: local
+        script: /scripts/limite-429.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 1 max VUs, 1m20s max duration (incl. graceful stop):
+              * rajada: 1 iterations for each of 1 VUs (maxDuration: 50s, gracefulStop: 30s)
+
+
+running (0m01.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+rajada   [   0% ] 1 VUs  00.9s/50s  0/1 iters, 1 per VU
+
+running (0m02.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+rajada   [   0% ] 1 VUs  01.9s/50s  0/1 iters, 1 per VU
+
+running (0m03.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+rajada   [   0% ] 1 VUs  02.9s/50s  0/1 iters, 1 per VU
+
+running (0m04.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+rajada   [   0% ] 1 VUs  03.9s/50s  0/1 iters, 1 per VU
+
+running (0m05.0s), 1/1 VUs, 0 complete and 0 interrupted iterations
+rajada   [   0% ] 1 VUs  04.9s/50s  0/1 iters, 1 per VU
+
+     data_received..................: 779 kB 155 kB/s
+     data_sent......................: 795 kB 159 kB/s
+     http_req_blocked...............: avg=16.3µs  min=3.3µs   med=6.2µs    max=3.7ms    p(90)=8.8µs    p(95)=11.9µs  
+     http_req_connecting............: avg=1.54µs  min=0s      med=0s       max=651.5µs  p(90)=0s       p(95)=0s      
+     http_req_duration..............: avg=6.85ms  min=1.16ms  med=4.16ms   max=1.4s     p(90)=8.09ms   p(95)=10.13ms 
+       { expected_response:true }...: avg=6.85ms  min=1.16ms  med=4.16ms   max=1.4s     p(90)=8.09ms   p(95)=10.13ms 
+     http_req_failed................: 0.00%  ✓ 0          ✗ 701
+     http_req_receiving.............: avg=188.4µs min=74.42µs med=167.44µs max=1.58ms   p(90)=255.74µs p(95)=310.78µs
+     http_req_sending...............: avg=49.61µs min=16.7µs  med=33.79µs  max=771.23µs p(90)=79.9µs   p(95)=97.62µs 
+     http_req_tls_handshaking.......: avg=0s      min=0s      med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=6.61ms  min=1.04ms  med=3.94ms   max=1.4s     p(90)=7.84ms   p(95)=9.97ms  
+     http_reqs......................: 701    139.943486/s
+     iteration_duration.............: avg=2.5s    min=68.91ms med=2.5s     max=4.93s    p(90)=4.45s    p(95)=4.69s   
+     iterations.....................: 1      0.199634/s
+   ✓ limite_429_sem_retry_after.....: 0.00%  ✓ 0          ✗ 400
+   ✓ limite_respostas_200...........: 300    59.890222/s
+   ✓ limite_respostas_429...........: 400    79.85363/s
+   ✓ limite_respostas_outras........: 0      0/s
+     vus............................: 1      min=1        max=1
+     vus_max........................: 1      min=1        max=1
+
+
+running (0m05.0s), 0/1 VUs, 1 complete and 0 interrupted iterations
+rajada ✓ [ 100% ] 1 VUs  04.9s/50s  1/1 iters, 1 per VU
+ Container desafio-arquiteto-postgres-1 Running 
+ Container desafio-arquiteto-rabbitmq-1 Running 
+ Container desafio-arquiteto-redis-1 Running 
+ Container desafio-arquiteto-consolidado-1 Recreate 
+ Container desafio-arquiteto-consolidado-1 Recreated 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-rabbitmq-1 Waiting 
+ Container desafio-arquiteto-redis-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-rabbitmq-1 Healthy 
+ Container desafio-arquiteto-redis-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Starting 
+ Container desafio-arquiteto-consolidado-1 Started 
+ Container desafio-arquiteto-consolidado-1 Waiting 
+ Container desafio-arquiteto-redis-1 Waiting 
+ Container desafio-arquiteto-postgres-1 Waiting 
+ Container desafio-arquiteto-rabbitmq-1 Waiting 
+ Container desafio-arquiteto-rabbitmq-1 Healthy 
+ Container desafio-arquiteto-postgres-1 Healthy 
+ Container desafio-arquiteto-redis-1 Healthy 
+ Container desafio-arquiteto-consolidado-1 Healthy 

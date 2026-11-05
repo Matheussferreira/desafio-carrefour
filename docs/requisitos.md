@@ -62,7 +62,7 @@ O "dia" de um lançamento é determinado **exclusivamente pelo campo `data` info
 
 ## Rate Limiting e Testes de Carga
 
-O rate limiter do Consolidado está em `6.000 req/min por IP` (100 req/s). O teste de carga k6 a 50 req/s de um único IP opera com 50% da cota — sem gerar `429` em nenhum momento da janela de 60s.
+O rate limiter do Consolidado está em `6.000 req/min por IP` (100 req/s), com janela fixa de 1 minuto. O teste de carga k6 a 50 req/s de um único IP opera com 50% da cota e não gera `429` nos cenários de 50 req/s. O pico de 200 req/s do k6 pode ou não receber `429`, conforme o alinhamento da janela; o `429` é provado de forma determinística em `tests/load/limite-429.js`, que baixa o limite por `RATE_LIMIT_MAX` (padrão 6.000, nunca alterado em produção). O limitador é em memória por instância (ver [testes.md](testes.md)).
 
 O Lançamentos está em `1.200 req/min por IP` (20 req/s), calibrado para o cenário de integração ERP em lote. Se o teste de carga for aplicado diretamente ao Lançamentos a mais de 20 req/s de um único IP, o rate limiter atuará como esperado. Isso é intencional: escrita é mais cara que leitura e o limite protege o banco de writes.
 

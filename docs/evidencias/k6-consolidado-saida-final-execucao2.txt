@@ -1,0 +1,66 @@
+Saída colada do terminal (PowerShell) da execução 2 de 3 do consolidado.js. Código de saída 99: falhou só o limite pico_respostas_429 (zero respostas 429 no pico), que na época exigia ao menos uma. Os limites de latência e de perda dos cenários de 50 req/s passaram.
+
+          /\      |‾‾| /‾‾/   /‾‾/
+     /\  /  \     |  |/  /   /  /
+    /  \/    \    |     (   /   ‾‾\
+   /          \   |  |\  \ |  (‾)  |
+  / __________ \  |__| \__\ \_____/ .io
+
+     execution: local
+        script: /scripts/consolidado.js
+        output: -
+
+     scenarios: (100.00%) 3 scenarios, 550 max VUs, 3m30s max duration (incl.graceful stop):
+              * cache_hit: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec:cacheHitScenario, gracefulStop: 30s)
+              * cache_miss: 50.00 iterations/s for 1m0s (maxVUs: 50-150, exec: cacheMissScenario, startTime: 1m10s, gracefulStop: 30s)
+              * pico_acima_do_limite: 200.00 iterations/s for 40s (maxVUs: 100-400, exec: picoScenario, startTime: 2m20s, gracefulStop: 30s)
+
+INFO[0002] [setup] Populando 2026-06-27 (cache_hit)...   source=console
+INFO[0002] [setup] Populando 60 datas (cache_miss)...    source=console
+INFO[0003] [setup] Aguardando propagação (SLA ≤ 5s; margem: 7s)...  source=console
+INFO[0010] [setup] cache_hit OK → {"source":"database","comercianteId":"loja-1","data":"2026-06-27","totalCreditos":"3550.00","totalDebitos":"3750.00","resource=console
+INFO[0011] [setup] cache_miss sample OK → 2026-02-01: {"source":"database","comercianteId":"loja-1","data":"2026-02-01","totalCreditos  source=console
+INFO[0011] [setup] cache_miss sample OK → 2026-04-01: {"source":"database","comercianteId":"loja-1","data":"2026-04-01","totalCreditos  source=console
+
+     ✓ HTTP 200
+     ✓ latência < 500ms
+
+     checks.........................: 100.00% ✓ 12002     ✗ 0
+     data_received..................: 17 MB   89 kB/s
+     data_sent......................: 16 MB   84 kB/s
+     dropped_iterations.............: 58      0.307612/s
+     http_req_blocked...............: avg=38.79µs  min=3.6µs  med=8.9µs   max=79.04ms  p(90)=13µs     p(95)=21.1µs
+     http_req_connecting............: avg=14.17µs  min=0s     med=0s      max=12.64ms  p(90)=0s       p(95)=0s
+     http_req_duration..............: avg=64.19ms  min=2.64ms med=7.28ms  max=1.49s    p(90)=188.78ms p(95)=337.58ms
+       { expected_response:true }...: avg=64.19ms  min=2.64ms med=7.28ms  max=1.49s    p(90)=188.78ms p(95)=337.58ms
+     ✓ { scenario:cache_hit }.......: avg=5.76ms   min=2.88ms med=4.88ms  max=61.59ms  p(90)=7.77ms   p(95)=10.83ms
+     ✓ { scenario:cache_miss }......: avg=7.43ms   min=3.05ms med=5.24ms  max=153.14ms p(90)=11.73ms  p(95)=18.6ms
+     http_req_failed................: 0.00%   ✓ 0         ✗ 14018
+     ✓ { scenario:cache_hit }.......: 0.00%   ✓ 0         ✗ 3001
+     ✓ { scenario:cache_miss }......: 0.00%   ✓ 0         ✗ 3000
+     http_req_receiving.............: avg=241.22µs min=42.8µs med=177.5µs max=32.02ms  p(90)=284.1µs  p(95)=406.56µs
+     http_req_sending...............: avg=97.52µs  min=16.1µs med=78.6µs  max=10.76ms  p(90)=118.31µs p(95)=158.31µs
+     http_req_tls_handshaking.......: avg=0s       min=0s     med=0s      max=0s       p(90)=0s       p(95)=0s
+     http_req_waiting...............: avg=63.85ms  min=2.45ms med=6.96ms  max=1.49s    p(90)=188.55ms p(95)=337.35ms
+     http_reqs......................: 14018   74.346533/s
+     iteration_duration.............: avg=65.67ms  min=2.87ms med=7.81ms  max=8.56s    p(90)=190.35ms p(95)=339.74ms
+     iterations.....................: 13944   73.954063/s
+   ✓ non_ok_rate....................: 0.00%   ✓ 0         ✗ 6001
+   ✓ pico_429_sem_retry_after.......: 0.00%   ✓ 0         ✗ 0
+     pico_respostas_200.............: 7943    42.126873/s
+   ✗ pico_respostas_429.............: 0       0/s
+   ✓ pico_respostas_outras..........: 0       0/s
+     vus............................: 4       min=0       max=121
+     vus_max........................: 192     min=150     max=192
+
+
+running (3m08.5s), 000/192 VUs, 13944 complete and 0 interrupted iterations
+cache_hit            ✓ [==================] 000/050 VUs  1m0s  50.00 iters/s
+cache_miss           ✓ [==================] 000/050 VUs  1m0s  50.00 iters/s
+pico_acima_do_limite ✓ [==================] 000/142 VUs  40s   200.00 iters/s
+ERRO[0191] thresholds on metrics 'pico_respostas_429' have been crossed
+
+
+What's next:
+    Debug this Compose error with Gordon → docker ai "help me fix this compose error"
+EXIT 99
