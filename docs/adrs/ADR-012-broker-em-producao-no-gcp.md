@@ -21,7 +21,7 @@ Um fato sobre o código de hoje precisa ficar explícito: **o repositório só t
 ## Alternativas
 
 ### RabbitMQ em cluster no GKE
-Mantém o mesmo broker em todos os ambientes, e o código de hoje funciona sem alteração. O custo é operar um cluster de três nós (StatefulSet, volumes persistentes, filas de quórum, atualizações, partição de rede, disco cheio) numa equipe pequena. A estimativa de custo (ver [custos.md](../custos.md)) é de US$ 145 a 243 por mês só de infraestrutura, contra cerca de zero do Pub/Sub neste volume, sem contar as horas de operação. **Descartado para produção**, mas é o plano B se o adaptador do Pub/Sub se mostrar inviável: nenhuma linha de código muda.
+Mantém o mesmo broker em todos os ambientes, e o código de hoje funciona sem alteração. O custo é operar um cluster de três nós (StatefulSet, volumes persistentes, filas de quórum, atualizações, partição de rede, disco cheio) numa equipe pequena. A estimativa de custo (ver [custos.md](../custos.md)) é de US$ 215 a 242 por mês só de infraestrutura (pods no preço oficial do Autopilot em São Paulo mais discos em hipótese), contra cerca de zero do Pub/Sub neste volume, sem contar as horas de operação. **Descartado para produção**, mas é o plano B se o adaptador do Pub/Sub se mostrar inviável: nenhuma linha de código muda.
 
 ### RabbitMQ gerenciado por terceiro (Marketplace)
 Elimina a operação do cluster e mantém o protocolo. Introduz outro fornecedor, outro contrato, e a rede e a residência dos dados precisam ser conferidas. Não foi avaliado em profundidade. **Fica como alternativa a verificar.**

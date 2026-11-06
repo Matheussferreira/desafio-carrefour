@@ -1,22 +1,26 @@
 # Estimativa de custos de infraestrutura e licenças
 
-Todos os valores são **estimativas**, em dólares americanos, para o Google Cloud na região `southamerica-east1` (São Paulo), consultadas em **2026-11-05**. Nada aqui foi cobrado nem medido numa conta real. O que não pôde ser confirmado em fonte oficial aparece como **faixa**, com a regra abaixo, e precisa ser validado na calculadora antes de qualquer compromisso de orçamento.
+Todos os valores são **estimativas**, em dólares americanos, para o Google Cloud na região `southamerica-east1` (São Paulo), consultadas em **2026-11-05**. Nada aqui foi cobrado nem medido numa conta real. Os preços unitários dos três itens que mais pesam (Cloud SQL, GKE Autopilot e Memorystore) são **oficiais de São Paulo**; o que ainda não tem confirmação aparece como faixa, e o conjunto precisa ser conferido na calculadora antes de qualquer compromisso de orçamento.
 
 ## Fonte e como validar
 
 A calculadora oficial é o [Google Cloud Pricing Calculator](https://cloud.google.com/products/calculator). Escolha a região `southamerica-east1` e refaça as tabelas abaixo; anote a data da validação ao lado do resultado. **Validação na calculadora: não realizada.**
 
-Como foi a consulta: as páginas de preço do Google são montadas por JavaScript e o catálogo de preços por API exige chave, então os valores vieram do **texto das páginas oficiais obtido por busca** e, no caso do Cloud SQL, de um **agregador de terceiros**. Por isso cada linha leva uma classificação:
+Como foi a consulta: os preços de Cloud SQL, GKE Autopilot e Memorystore foram lidos nas **páginas de preço oficiais com a região `southamerica-east1` selecionada na tabela**, em 2026-11-05, sob demanda, 730 horas por mês. Os itens globais (Pub/Sub, Secret Manager, Cloud KMS, Cloud Armor, Cloud Logging, Prometheus gerenciado, Cloud Trace e balanceador) vêm do texto das páginas oficiais. Cada linha das tabelas leva uma classificação:
 
 | Classe | Significado | Como entra na tabela |
 |---|---|---|
-| **O** | Preço oficial, igual em todas as regiões (confirmado em texto da página do produto) | Valor único |
-| **R** | Preço oficial, mas a região da tabela consultada não foi confirmada como São Paulo | De 1,0 a 1,6 vezes o valor de referência. O fator de 1,6 é uma **hipótese** de prêmio regional, a validar |
-| **T** | Dado de terceiros para São Paulo (não oficial, sem data) | De 1,0 a 1,25 vezes o valor de referência |
+| **O** | Preço oficial, igual em todas as regiões, ou lido na tabela oficial de São Paulo | Valor único |
 | **H** | Hipótese sem fonte | Faixa informada na linha |
 
-| Item | Referência usada | Fonte | Classe |
+| Item | Preço usado (`southamerica-east1`, sob demanda) | Fonte | Classe |
 |---|---|---|---|
+| Cloud SQL for PostgreSQL, Enterprise, uso geral, zonal | vCPU US$ 0,062 por hora; memória US$ 0,0105 por GiB-hora; SSD US$ 0,000349315 por GiB-hora | [cloud.google.com/sql/pricing](https://cloud.google.com/sql/pricing) | O |
+| Cloud SQL, alta disponibilidade regional | vCPU US$ 0,1239 por hora; memória US$ 0,021 por GiB-hora; SSD US$ 0,00069863 por GiB-hora | idem | O |
+| Cloud SQL, backup | US$ 0,000164384 por GiB-hora (US$ 0,12 por GiB-mês) | idem | O |
+| GKE Autopilot, pods na plataforma padrão | vCPU US$ 0,0707 por hora; memória US$ 0,0078164 por GiB-hora | [cloud.google.com/kubernetes-engine/pricing](https://cloud.google.com/kubernetes-engine/pricing) | O |
+| GKE, taxa de gerenciamento do cluster | US$ 0,10 por hora (US$ 73,00 por mês); crédito gratuito de US$ 74,40 por mês por conta de faturamento, aplicável a **um** cluster Autopilot ou zonal | idem | O |
+| Memorystore for Redis, M1 | Basic US$ 0,087 por GiB-hora; Standard US$ 0,146 por GiB-hora | [cloud.google.com/memorystore/docs/redis/pricing](https://cloud.google.com/memorystore/docs/redis/pricing) | O |
 | Pub/Sub | US$ 40 por TiB; 10 GiB gratuitos por mês, por conta de faturamento; o preço é o mesmo em todas as regiões | [cloud.google.com/pubsub/pricing](https://cloud.google.com/pubsub/pricing) | O |
 | Secret Manager | US$ 0,06 por versão ativa por mês (6 gratuitas); US$ 0,03 por 10 mil acessos (10 mil gratuitos) | [cloud.google.com/secret-manager/pricing](https://cloud.google.com/secret-manager/pricing) | O |
 | Cloud KMS | US$ 0,06 por versão de chave de software por mês; US$ 0,03 por 10 mil operações | [cloud.google.com/kms/pricing](https://cloud.google.com/kms/pricing) | O |
@@ -26,11 +30,8 @@ Como foi a consulta: as páginas de preço do Google são montadas por JavaScrip
 | Cloud Trace | US$ 0,20 por milhão de spans; 2,5 milhões gratuitos por conta de faturamento | idem | O |
 | Balanceador, regras de encaminhamento | US$ 0,025 por hora para as 5 primeiras regras | [cloud.google.com/load-balancing/pricing](https://cloud.google.com/load-balancing/pricing) | O |
 | Balanceador, dados processados | US$ 0,008 a 0,012 por GB conforme a região | idem | faixa |
-| GKE Autopilot | US$ 0,0445 por vCPU-hora e US$ 0,0049225 por GiB-hora (perfil de uso geral, pods sob demanda) | [cloud.google.com/kubernetes-engine/pricing](https://cloud.google.com/kubernetes-engine/pricing) | R |
-| Memorystore for Redis, Standard M1 | US$ 0,064 por GiB-hora | [cloud.google.com/memorystore/docs/redis/pricing](https://cloud.google.com/memorystore/docs/redis/pricing) | R |
-| Cloud SQL for PostgreSQL, Enterprise, São Paulo | US$ 74 por mês para 1 vCPU e 3,75 GB, US$ 148 para 2 vCPU e 7,5 GB, só computação, sob demanda, instância única | [bytebase.com/dbcost](https://www.bytebase.com/dbcost/cloudsql/instance/db-standard-2/) (terceiros) | T |
 
-A alta disponibilidade regional do Cloud SQL **dobra** o custo de computação e de armazenamento da instância (uma instância principal e uma em espera em outra zona). Confirme essa regra na página de preços do Cloud SQL.
+A alta disponibilidade regional do Cloud SQL **dobra** o custo de vCPU, de memória e de armazenamento da instância (instância principal e instância em espera em outra zona), como mostram os preços acima: 0,1239 contra 0,062 por vCPU-hora, 0,021 contra 0,0105 por GiB-hora e 0,00069863 contra 0,000349315 por GiB-hora. O backup não dobra.
 
 ## Premissas
 
@@ -38,9 +39,25 @@ A alta disponibilidade regional do Cloud SQL **dobra** o custo de computação e
 - 730 horas por mês, preço sob demanda, sem desconto por uso comprometido (ver a seção de otimizações).
 - Dois bancos PostgreSQL em instâncias Cloud SQL separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md).
 - Quatro componentes de aplicação em GKE Autopilot: `lancamentos`, `lancamentos-relay`, `consolidado` (com o consumidor) e o Keycloak. O tamanho de cada pod é uma **hipótese**; a capacidade medida do consolidado (cerca de 197 a 199 req/s numa instância, em máquina de desenvolvimento, [testes.md](testes.md)) não foi medida no GKE.
+- **Um único cluster GKE na conta de faturamento**, o que zera a taxa de gerenciamento pelo crédito (ver abaixo).
 - Broker: Pub/Sub ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)), cerca de 3 milhões de mensagens por mês de menos de 1 KB.
 - Cloud NAT fora da conta: nenhum componente precisa de saída para a internet ([arquitetura-alvo-cloud.md](arquitetura-alvo-cloud.md)).
 - Moeda: dólar. Não incluo impostos, suporte do Google, câmbio nem horas de operação da equipe.
+
+## Taxa de gerenciamento do cluster GKE
+
+A taxa é de US$ 0,10 por hora por cluster, ou **US$ 73,00 por mês** (0,10 x 730). O crédito gratuito de **US$ 74,40 por mês por conta de faturamento** cobre um cluster Autopilot ou zonal, e por isso a taxa entra como **zero** nos cenários abaixo.
+
+**Esse zero só vale enquanto houver um único cluster na conta de faturamento.** Cada cluster adicional soma US$ 73,00 por mês, e o mesmo vale para um cluster regional do modo Standard, que não é coberto pelo crédito. Consequências práticas:
+
+| Situação | Taxa de cluster |
+|---|---|
+| Um cluster Autopilot na conta | 0,00 (73,00 menos o crédito de 74,40) |
+| Homologação e produção em dois clusters na mesma conta | 73,00 por mês (um fica coberto, o outro paga) |
+| Dois clusters de produção (por exemplo um por região, se o DR em outra região for aprovado) | 73,00 por mês |
+| Cluster regional no modo Standard | 73,00 por mês, sem crédito |
+
+O crédito que sobra (US$ 1,40) não acumula. Se a empresa já tem outro cluster na mesma conta de faturamento, o crédito já está consumido e a taxa desta solução entra por inteiro: confirme com a área de nuvem.
 
 ## Licenças
 
@@ -52,11 +69,12 @@ Serve para homologação ou para uma operação pequena que aceita parada. **Nã
 
 | Item | Cl. | US$/mês | Cálculo |
 |---|---|---|---|
-| GKE Autopilot, 4 pods (2,0 vCPU e 4 GiB no total) | R | 79,34 a 126,95 | (2,0 x 0,0445 + 4 x 0,0049225) x 730 |
-| Cloud SQL, 2 x `db-custom-1-3840`, zona única | T | 148,00 a 185,00 | 2 x 74 |
-| Cloud SQL, SSD de 2 x 20 GB | H | 6,80 a 14,00 | 40 GB x 0,17 a 0,35 |
-| Cloud SQL, backups de 40 GB | H | 3,20 a 8,00 | 40 GB x 0,08 a 0,20 |
-| Memorystore Redis Basic, 1 GiB | H | 23,36 a 74,75 | 0,5 a 1,6 x (0,064 x 730) |
+| GKE Autopilot, 4 pods (2,0 vCPU e 4 GiB no total) | O | 126,05 | (2,0 x 0,0707 + 4 x 0,0078164) x 730 |
+| GKE, taxa de gerenciamento do cluster | O | 0,00 | 0,10 x 730 = 73,00, menos o crédito de 74,40 (um cluster na conta) |
+| Cloud SQL, computação de 2 x `db-custom-1-3840` (1 vCPU e 3,75 GiB), zonal | O | 148,01 | (2 x 0,062 + 7,5 x 0,0105) x 730 |
+| Cloud SQL, SSD de 2 x 20 GB, zonal | O | 10,20 | 40 x 0,000349315 x 730 |
+| Cloud SQL, backups de 40 GB | O | 4,80 | 40 x 0,000164384 x 730 |
+| Memorystore Redis Basic, 1 GiB | O | 63,51 | 0,087 x 730 |
 | Balanceador, 1 regra de encaminhamento | O | 18,25 | 0,025 x 730 |
 | Balanceador, 50 GB processados | faixa | 0,40 a 0,60 | 50 x 0,008 a 0,012 |
 | Cloud Armor Standard, 1 política, 3 regras, 30 M de requisições | O | 30,50 | 5 + 3 x 1 + 30 x 0,75 |
@@ -66,12 +84,13 @@ Serve para homologação ou para uma operação pequena que aceita parada. **Nã
 | Secret Manager, 5 versões ativas | O | 0,00 | abaixo das 6 gratuitas |
 | Cloud Logging, 10 GiB | O | 0,00 | abaixo dos 50 GiB gratuitos |
 | Artifact Registry, 1 GB | H | 0,05 a 0,25 | hipótese |
-| **Total estimado** | | **cerca de 326 a 480** (ponto médio 403) | |
+| **Total estimado** | | **cerca de 418 a 424** (ponto médio 421) | soma dos itens: 411,69 de valores únicos mais 6,45 a 12,35 das faixas |
 
 Observações do cenário A:
-- A faixa larga vem sobretudo do GKE Autopilot e do Memorystore (classes R e H) e do Cloud SQL (classe T). O limite inferior usa o valor de referência sem prêmio regional, e o superior supõe o prêmio de 1,6 vez, que é hipótese.
-- O Redis do nível Basic não tem réplica nem failover. O preço do Basic não foi confirmado; a faixa o coloca entre metade do Standard e o Standard com o prêmio regional.
+- Os três produtos de preço regional (GKE, Cloud SQL e Memorystore) somam **352,57** e entram com valor único. A faixa que sobra, de menos de US$ 6, vem só do balanceador (dados processados), da saída para a internet e do Artifact Registry.
+- O Redis do nível Basic não tem réplica nem failover.
 - O Pub/Sub custa zero porque cerca de 3 milhões de mensagens por mês de menos de 1 KB ficam em alguns GiB (publicação e entrega), abaixo da franquia gratuita de 10 GiB por mês por conta de faturamento. A franquia é compartilhada com outros projetos da mesma conta.
+- Com um segundo cluster na mesma conta, some 73,00 (ver a seção da taxa de cluster).
 
 ## Cenário B: produção com alta disponibilidade
 
@@ -79,11 +98,12 @@ Três zonas na região, dois ou mais pods por serviço, bancos com HA regional, 
 
 | Item | Cl. | US$/mês | Cálculo |
 |---|---|---|---|
-| GKE Autopilot, 8 pods (4,5 vCPU e 9 GiB no total) | R | 178,52 a 285,64 | (4,5 x 0,0445 + 9 x 0,0049225) x 730 |
-| Cloud SQL, 2 x `db-custom-2-7680`, HA regional | T | 592,00 a 740,00 | 2 bancos x 2 (HA) x 148 |
-| Cloud SQL, SSD de 2 x 50 GB, dobrado pela HA | H | 34,00 a 70,00 | 200 GB x 0,17 a 0,35 |
-| Cloud SQL, backups e PITR, 100 GB | H | 8,00 a 20,00 | 100 GB x 0,08 a 0,20 |
-| Memorystore Redis Standard, 1 GiB | R | 46,72 a 74,75 | 0,064 x 730 |
+| GKE Autopilot, 8 pods (4,5 vCPU e 9 GiB no total) | O | 283,60 | (4,5 x 0,0707 + 9 x 0,0078164) x 730 |
+| GKE, taxa de gerenciamento do cluster | O | 0,00 | 0,10 x 730 = 73,00, menos o crédito de 74,40 (um cluster na conta) |
+| Cloud SQL, computação de 2 x `db-custom-2-7680` (2 vCPU e 7,5 GiB), HA regional | O | 591,74 | (4 x 0,1239 + 15 x 0,021) x 730 |
+| Cloud SQL, SSD de 2 x 50 GB, HA | O | 51,00 | 100 x 0,00069863 x 730 |
+| Cloud SQL, backups e PITR, 100 GB | O | 12,00 | 100 x 0,000164384 x 730 |
+| Memorystore Redis Standard, 1 GiB | O | 106,58 | 0,146 x 730 |
 | Balanceador, 1 regra de encaminhamento | O | 18,25 | 0,025 x 730 |
 | Balanceador, 200 GB processados | faixa | 1,60 a 2,40 | 200 x 0,008 a 0,012 |
 | Cloud Armor Standard, 1 política, 6 regras, 30 M de requisições e regras gerenciadas | O | 56,00 | 5 + 6 x 1 + 30 x 0,75 + 30 x 0,75 |
@@ -96,21 +116,22 @@ Três zonas na região, dois ou mais pods por serviço, bancos com HA regional, 
 | Pub/Sub, cerca de 6 GiB de vazão | O | 0,00 | dentro da franquia; a 10 vezes o volume seria cerca de 1,95 |
 | Cloud Storage, logs de auditoria com retenção bloqueada, 100 GB | H | 2,00 a 5,00 | 100 GB x 0,02 a 0,05 |
 | Artifact Registry, 2 GB | H | 0,10 a 0,35 | hipótese |
-| **Total estimado** | | **cerca de 980 a 1.326** (ponto médio 1.153) | |
+| **Total estimado** | | **cerca de 1.165 a 1.181** (ponto médio 1.173) | soma dos itens: 1.149,78 de valores únicos mais 15,70 a 30,75 das faixas |
 
 Observações do cenário B:
-- O **Cloud SQL domina o custo** (cerca de 65% do total: 634 de 980 no limite inferior, 830 de 1.326 no superior). É a consequência de ter dois bancos com HA regional, como pede o ADR-004. O broker, que na alternativa com RabbitMQ gerenciado seria o maior item, aqui é praticamente zero.
+- O **Cloud SQL domina o custo** (cerca de 56% do total: 654,74 de cerca de 1.170). É a consequência de ter dois bancos com HA regional, como pede o ADR-004. O GKE vem em seguida (cerca de 24%) e o Memorystore Standard em terceiro (cerca de 9%). O broker, que na alternativa com RabbitMQ no GKE custaria algumas centenas de dólares, aqui é praticamente zero.
+- Os três produtos de preço regional somam **1.044,92** e entram com valor único. A faixa que sobra, de cerca de US$ 15 de largura, vem do balanceador, da saída para a internet, do Cloud Storage e do Artifact Registry, todos de peso pequeno.
 - Os 18 spans por trace foram medidos num `POST /lancamentos` que atravessa API, relay e consolidado (ver [observabilidade.md](observabilidade.md)). A amostragem de 5% é premissa.
 - As 1.000 e 1.500 séries do Prometheus são **hipóteses de volume**; o número real depende dos rótulos das métricas. O preço por amostra é oficial.
 - O Cloud Armor com regras gerenciadas (WAF pré-configurado) cobra por requisição avaliada, o que dobra a parcela por requisição.
+- Com um segundo cluster na mesma conta (por exemplo homologação junto com produção), some 73,00 (ver a seção da taxa de cluster).
 
 ## Itens sem preço confirmado, fora dos totais
 
-Não consegui confirmar preço para estes itens, então **não entram nos totais** e precisam ser levantados na calculadora antes de qualquer proposta:
+Estes itens **não entram nos totais** e precisam ser levantados na calculadora antes de qualquer proposta:
 
 | Item | Quando entra | O que fazer |
 |---|---|---|
-| Taxa de gerenciamento do cluster GKE | Sempre | A página de preços cita uma taxa por cluster-hora com um crédito mensal por conta de faturamento. Confirme o valor e se o crédito cobre o cluster desta solução |
 | API Gateway | Se a quota por cliente ficar no gateway | Calcular por milhão de chamadas na calculadora |
 | Apigee | Só se houver muitos integradores externos com portal e análise | Calcular na calculadora; tende a ser muito maior que o API Gateway |
 | Identity Platform | Não se aplica ao consumo por *client credentials* | Ver a comparação abaixo |
@@ -120,25 +141,38 @@ Não consegui confirmar preço para estes itens, então **não entram nos totais
 | Logs de auditoria de acesso a dados (Cloud SQL, Secret Manager, KMS) | Auditoria completa | O volume ingerido é premissa; se passar de 60 GiB por mês, entra a faixa paga do Logging |
 | Descontos por uso comprometido | Operação contínua | Calcular na calculadora; não estimo percentual |
 | Cloud NAT | Só se um componente precisar de saída para a internet | Referência da página: US$ 0,045 por GiB, mais o custo por IP; 100 GB seriam cerca de US$ 4,50 de dados |
+| Cluster adicional | Segundo cluster na mesma conta | US$ 73,00 por mês por cluster (seção da taxa de cluster) |
 
 ## Gerenciado ou auto gerenciado
 
 ### Pub/Sub ou RabbitMQ no GKE
 
+O RabbitMQ em três pods de 1 vCPU e 2 GiB, no preço confirmado do Autopilot em São Paulo:
+
+| Parcela | Cálculo | US$/mês |
+|---|---|---|
+| vCPU, 3 x 1 | 3 x 0,0707 x 730 | 154,83 |
+| Memória, 3 x 2 GiB | 6 x 0,0078164 x 730 | 34,24 |
+| **Pods** | | **189,07** |
+| Discos SSD, 3 x 50 GB (hipótese H) | 150 GB x 0,17 a 0,35 | 25,50 a 52,50 |
+| **Total** | | **214,57 a 241,57** |
+
+A taxa de cluster não entra, porque os pods rodam no mesmo cluster da aplicação.
+
 | | Pub/Sub | RabbitMQ em 3 pods no GKE Autopilot |
 |---|---|---|
-| Custo mensal estimado | cerca de 0 neste volume (10 vezes o volume: cerca de 1,95) | pods: 119,02 a 190,42 (3 x 1 vCPU e 2 GiB); discos SSD de 3 x 50 GB: 25,50 a 52,50 (hipótese H); **total 144,52 a 242,92** |
+| Custo mensal estimado | cerca de 0 neste volume (10 vezes o volume: cerca de 1,95) | **214,57 a 241,57** (pods 189,07 mais discos) |
 | Quem opera | O Google | A equipe: atualização, filas de quórum, volumes, partição de rede, disco cheio, backup |
 | Código | Exige o adaptador do [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md) | O código de hoje funciona sem mudança |
 | Risco | Baixo de operação; médio de semântica (tópico sem assinatura descarta; contagem de tentativas na DLQ) | Médio a alto de operação |
 
-A diferença de custo é pequena em valor absoluto (algumas centenas de dólares por mês), e a decisão pesa mais em **operação e em código**: o Pub/Sub tira o cluster da equipe, ao preço de um adaptador novo e do desvio entre o broker dos testes e o de produção. As horas de operação do RabbitMQ no GKE não estão na conta.
+A diferença de custo é de cerca de 215 a 242 dólares por mês, e a decisão pesa mais em **operação e em código**: o Pub/Sub tira o cluster da equipe, ao preço de um adaptador novo e do desvio entre o broker dos testes e o de produção. As horas de operação do RabbitMQ no GKE não estão na conta.
 
 ### Keycloak no GKE ou Identity Platform
 
 | | Keycloak no GKE (2 pods de 1 vCPU e 2 GiB) | Identity Platform |
 |---|---|---|
-| Custo mensal estimado | 79,34 a 126,95 de pods, mais o banco (um terceiro banco na instância de lançamentos) | Cobrança por usuário ativo mensal (preço não confirmado) |
+| Custo mensal estimado | 126,05 de pods (2 x 0,0707 + 4 x 0,0078164, x 730), mais o banco (um terceiro banco na instância de lançamentos) | Cobrança por usuário ativo mensal (preço não confirmado) |
 | Serve a *client credentials* | **Sim.** É o que o código usa | **Não é o caso de uso.** O produto é voltado à autenticação de usuários finais; não confirmei suporte ao fluxo de máquina a máquina e, se não houver, ele não substitui o Keycloak aqui |
 | Quem opera | A equipe: atualização, realm, HA, TLS | O Google |
 
@@ -148,9 +182,10 @@ Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tok
 
 | Otimização | Efeito | Cálculo |
 |---|---|---|
-| Pods Spot no ambiente de homologação (cenário A) | A parcela de CPU cai de US$ 64,97 para US$ 19,42 por mês, **economia de US$ 45,55** | 2,0 vCPU x 0,0133 x 730 contra 2,0 x 0,0445 x 730. A referência de US$ 0,0133 por vCPU-hora de pod Spot é classe R e a memória não foi confirmada. Pods Spot podem ser retomados a qualquer momento: **só para ambiente que aceita parada**, nunca para o relay ou o consumidor em produção |
-| Pub/Sub no lugar de RabbitMQ no GKE | economia de cerca de US$ 145 a 243 por mês | ver a comparação acima; troca custo de operação por trabalho de adaptador |
+| Pods Spot no ambiente de homologação (cenário A) | **Não calculado.** O preço de pod Spot em São Paulo não foi confirmado, e o valor de referência que eu usava vinha de uma tabela de região não confirmada | Para estimar, ler o preço Spot de vCPU e de memória na tabela de São Paulo. Pods Spot podem ser retomados a qualquer momento: **só para ambiente que aceita parada**, nunca para o relay ou o consumidor em produção |
+| Pub/Sub no lugar de RabbitMQ no GKE | economia de cerca de US$ 215 a 242 por mês | ver a comparação acima; troca custo de operação por trabalho de adaptador |
 | Sem Cloud NAT | evita a taxa por IP e por GiB | nenhum componente precisa de saída para a internet |
+| Um cluster por conta de faturamento | evita US$ 73,00 por mês por cluster adicional | o crédito de US$ 74,40 cobre só um cluster; agrupar ambientes em namespaces do mesmo cluster tem custo de isolamento a avaliar |
 | Descontos por uso comprometido | não calculado | Depois de 3 a 6 meses de uso estável, avaliar com os dados reais |
 
 Práticas de governança de custo (aproveitadas de um estudo anterior do mesmo autor, sem os números dele):
@@ -162,7 +197,9 @@ Práticas de governança de custo (aproveitadas de um estudo anterior do mesmo a
 
 ## O que este documento não afirma
 
-- Não há custo medido numa conta do Google Cloud. Os totais são aritmética sobre preços de referência e premissas de volume.
-- A maior parte da incerteza está nos preços do GKE Autopilot, do Cloud SQL e do Memorystore em São Paulo, que não consegui confirmar em fonte oficial; a faixa existe por isso.
+- Não há custo medido numa conta do Google Cloud. Os totais são aritmética sobre preços de tabela e premissas de volume.
+- Os preços unitários de Cloud SQL, GKE Autopilot e Memorystore são os oficiais de São Paulo lidos em 2026-11-05, mas a **validação na calculadora não foi feita**, e preços mudam.
 - O tamanho dos pods e dos bancos é hipótese a validar com teste de carga no próprio Google Cloud.
+- A taxa de cluster zerada depende de haver um único cluster na conta de faturamento.
+- Ainda são hipóteses (classe H): armazenamento e saída para a internet, Artifact Registry, Cloud Storage de auditoria e o volume de séries do Prometheus.
 - Não incluo impostos, suporte do Google, câmbio nem horas de operação da equipe.
