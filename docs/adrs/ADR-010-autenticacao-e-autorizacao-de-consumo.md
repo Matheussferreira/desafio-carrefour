@@ -41,6 +41,16 @@ Dá identidade forte ao cliente, mas não expressa escopos nem o vínculo com o 
 ### Identity Platform do Google Cloud
 É o serviço de identidade gerenciado do Google Cloud e fala OIDC, mas é voltado à autenticação de **usuários finais**. O consumo desta solução é de máquina a máquina, pelo fluxo *client credentials*, e eu **não confirmei** que o produto o ofereça; se não oferecer, ele não substitui o Keycloak aqui. Mesmo que oferecesse, a troca **não seria só configuração** (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`): os claims e os nomes dos escopos mudam, e o claim `comerciante_id` exigiria um mecanismo de geração de token. A validação em `auth.ts` precisaria aceitar esses formatos. Confirmar na documentação do produto antes de decidir diferente; a comparação de custo está em [custos.md](../custos.md).
 
+### Apigee como emissor de token OAuth2
+O Apigee, produto de gerenciamento de APIs do Google Cloud, pode atuar como servidor de autorização e emitir tokens OAuth2 no fluxo *client credentials*, com cadastro de aplicativos, produtos de API, quotas e portal para o integrador. Eu o cito como alternativa real ao Keycloak em produção, mas **não confirmei** os detalhes do token emitido (formato JWT assinado com RS256, publicação de JWKS, claims e escopos personalizados como o `comerciante_id`); isso precisa ser verificado na documentação antes de decidir.
+
+Quando faria sentido trocar o Keycloak por ele:
+- a empresa já tem o Apigee contratado e uma equipe que o opera;
+- há muitos integradores externos que precisam de portal de autoatendimento, produtos de API, quotas e análise de uso, o que o Keycloak não oferece;
+- a quota por cliente e a emissão do token ficam num só lugar, e a equipe prefere não operar o Keycloak (realm, HA, TLS, atualização).
+
+Quando **não** faz sentido: poucos integradores (o caso de hoje), custo (tende a ser muito maior que o do API Gateway e que o de dois pods de Keycloak, ver [custos.md](../custos.md)) e o risco de a validação em `auth.ts` precisar aceitar outro formato de claims e de audiência. A troca de emissor é configuração (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`) apenas se o token emitido trouxer o `comerciante_id`, os escopos e a audiência por API no formato esperado. Por isso a proposta mantém o Keycloak e trata o Apigee como evolução condicionada a esses critérios.
+
 ### Tokens de identidade de contas de serviço do Google
 Para chamadas entre serviços dentro do próprio Google Cloud, uma conta de serviço pode obter um token OIDC assinado pelo Google, validável por JWKS, sem Keycloak. Não carrega o `comerciante_id` nem escopos de negócio, então o vínculo entre o cliente e o comerciante ficaria em configuração dos serviços, e não serve a integradores externos (ERPs de comerciantes). **Descartado** para o consumo externo; fica como opção para chamadas internas futuras.
 

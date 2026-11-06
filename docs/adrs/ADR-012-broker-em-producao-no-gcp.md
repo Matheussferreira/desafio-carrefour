@@ -38,7 +38,7 @@ Gerenciado, regional, com as mensagens replicadas entre zonas, sem cluster para 
 |---|---|---|
 | Evento gravado junto com o lançamento ([ADR-005](ADR-005-outbox-pattern.md)) | Outbox | **Igual.** O Pub/Sub não participa da transação do banco; o outbox continua necessário |
 | Só marcar como publicado depois da confirmação | `ConfirmChannel` | **Equivalente.** A publicação devolve o identificador da mensagem somente depois de o serviço tê-la gravado; o relay espera esse retorno antes do `UPDATE ... 'publicado'` |
-| Falha de rota não pode ser silenciosa (`mandatory`) | Mensagem sem fila volta ao relay | **Diferente, exige cuidado.** Publicar num tópico que não tem assinatura **não é erro**: a mensagem é descartada. Mitigação: criar a assinatura pela infraestrutura antes de o relay existir, ligar a retenção de mensagens do tópico (permite reexecutar a leitura a partir de um instante) e alertar quando o atraso da assinatura ou a idade da mensagem mais antiga crescer. Confirmar os detalhes na documentação |
+| Falha de rota não pode ser silenciosa (`mandatory`) | Mensagem sem fila volta ao relay | **Diferente, exige cuidado.** Publicar num tópico que não tem assinatura **não é erro**: a mensagem é descartada. Mitigação: **a assinatura é criada pela infraestrutura antes do primeiro `publish`** (a infraestrutura como código cria tópico e assinatura juntos, e o relay só é implantado depois; os serviços não criam recursos em tempo de execução). Além disso, ligar a retenção de mensagens do tópico (permite reexecutar a leitura a partir de um instante) e alertar quando o atraso da assinatura ou a idade da mensagem mais antiga crescer. Como o evento permanece no outbox até a confirmação, e a confirmação só diz que o tópico aceitou a mensagem, a assinatura existir antes é o que fecha a lacuna. Confirmar os detalhes na documentação |
 | Entrega pelo menos uma vez | Sim | **Sim.** O Pub/Sub também pode entregar mais de uma vez |
 | Consumidor idempotente ([ADR-007](ADR-007-idempotencia.md)) | `eventos_processados` | **Igual, e continua sendo obrigatório.** Não se apoia na entrega exata uma vez que alguns tipos de assinatura oferecem, porque o relay já pode publicar duas vezes |
 | Uma mensagem por vez (`prefetch=1`) | `prefetch` | Controle de fluxo do cliente com no máximo 1 mensagem pendente por instância |
@@ -57,7 +57,17 @@ No RabbitMQ, o consumidor segura a mensagem sem confirmar até o banco voltar. N
 - **Segurar a mensagem estendendo o prazo de confirmação.** A biblioteca estende o prazo automaticamente até um limite configurável; passado o limite, a mensagem volta e **conta como uma nova tentativa de entrega**.
 - **Recusar (`nack`) e deixar a política de nova tentativa com espera exponencial agir.** Cada recusa **conta para o limite de tentativas de entrega** da política de mensagens mortas. Um banco fora por tempo suficiente levaria mensagens válidas para a DLQ, que é exatamente o erro que o ADR-011 corrigiu.
 
-A abordagem recomendada é **pausar a assinatura** (parar de puxar novas mensagens) enquanto o banco falha numa sonda de saúde, segurando só a mensagem em mãos com a extensão de prazo, e retomar quando o banco voltar. Isso precisa ser **validado em teste** com o emulador e na nuvem, e o limite de tentativas da DLQ deve ser alto o bastante para não ser alcançado por falhas transitórias normais.
+#### Mitigação adotada
+
+1. **Em erro transitório o consumidor não faz `nack`.** Erro transitório é banco fora, timeout ou conexão recusada, a mesma classificação do ADR-011. Recusar contaria a tentativa sem que a mensagem tenha culpa.
+2. **O consumidor pausa a puxada pelo controle de fluxo** (para de receber novas mensagens) enquanto uma sonda de saúde do banco falhar, e retoma quando o banco voltar. Assim um banco fora não faz o consumidor consumir tentativas de várias mensagens ao mesmo tempo.
+3. **A mensagem em mãos é reentregue pela política de nova tentativa com espera exponencial** (do prazo de confirmação expirado), em vez de ser segurada indefinidamente. A espera cresce a cada tentativa e limita o ritmo de reentrega.
+4. **`max_delivery_attempts` fica alto, até 100** (o máximo que o Pub/Sub aceita para a política de mensagens mortas). Com a espera exponencial no teto, 100 tentativas cobrem uma indisponibilidade de muitas horas (ordem de grandeza: se a espera média ficasse em alguns minutos, seriam mais de um dia; **estimativa**, depende do `minimum_backoff` e do `maximum_backoff` configurados). O valor exato sai do teste de indisponibilidade do banco, e não deste texto.
+5. **Quem chega à DLQ por esgotar tentativas continua sendo tratado:** o alerta de mensagem na DLQ dispara, e o script de reprocessamento a devolve ao tópico principal. É a última rede, e não o caminho esperado.
+
+Erro permanente (mensagem inválida ou versão 2.x) segue o caminho próprio: publicar no tópico de mensagens mortas e dar `ack`, sem depender da contagem de tentativas.
+
+Nada disso foi executado: precisa ser **validado em teste** com o emulador e na nuvem (derrubar o banco por mais tempo que o prazo de confirmação e conferir que nenhuma mensagem vai à DLQ e que o consumo retoma sozinho).
 
 ## O trabalho para criar o adaptador do Pub/Sub
 
