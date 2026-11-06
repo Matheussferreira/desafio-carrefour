@@ -19,6 +19,7 @@ Como foi a consulta: os preços de Cloud SQL, GKE Autopilot e Memorystore foram 
 | Cloud SQL, alta disponibilidade regional | vCPU US$ 0,1239 por hora; memória US$ 0,021 por GiB-hora; SSD US$ 0,00069863 por GiB-hora | idem | O |
 | Cloud SQL, backup | US$ 0,000164384 por GiB-hora (US$ 0,12 por GiB-mês) | idem | O |
 | GKE Autopilot, pods na plataforma padrão | vCPU US$ 0,0707 por hora; memória US$ 0,0078164 por GiB-hora | [cloud.google.com/kubernetes-engine/pricing](https://cloud.google.com/kubernetes-engine/pricing) | O |
+| GKE Autopilot, pods Spot na plataforma padrão | vCPU US$ 0,0212 por hora; memória US$ 0,0023449 por GiB-hora | idem | O |
 | GKE, taxa de gerenciamento do cluster | US$ 0,10 por hora (US$ 73,00 por mês); crédito gratuito de US$ 74,40 por mês por conta de faturamento, aplicável a **um** cluster Autopilot ou zonal | idem | O |
 | Memorystore for Redis, M1 | Basic US$ 0,087 por GiB-hora; Standard US$ 0,146 por GiB-hora | [cloud.google.com/memorystore/docs/redis/pricing](https://cloud.google.com/memorystore/docs/redis/pricing) | O |
 | Pub/Sub | US$ 40 por TiB; 10 GiB gratuitos por mês, por conta de faturamento; o preço é o mesmo em todas as regiões | [cloud.google.com/pubsub/pricing](https://cloud.google.com/pubsub/pricing) | O |
@@ -182,11 +183,32 @@ Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tok
 
 | Otimização | Efeito | Cálculo |
 |---|---|---|
-| Pods Spot no ambiente de homologação (cenário A) | **Não calculado.** O preço de pod Spot em São Paulo não foi confirmado, e o valor de referência que eu usava vinha de uma tabela de região não confirmada | Para estimar, ler o preço Spot de vCPU e de memória na tabela de São Paulo. Pods Spot podem ser retomados a qualquer momento: **só para ambiente que aceita parada**, nunca para o relay ou o consumidor em produção |
+| Pods Spot (ver a seção abaixo) | Homologação inteira (cenário A): **US$ 126,05 para US$ 37,80, economia de US$ 88,25 (cerca de 70%)**. Produção: só relay e consumidor, economia de US$ 22,06 no relay | Cálculos na seção "Pods Spot". Preços Spot oficiais de São Paulo (classe O) |
 | Pub/Sub no lugar de RabbitMQ no GKE | economia de cerca de US$ 215 a 242 por mês | ver a comparação acima; troca custo de operação por trabalho de adaptador |
 | Sem Cloud NAT | evita a taxa por IP e por GiB | nenhum componente precisa de saída para a internet |
 | Um cluster por conta de faturamento | evita US$ 73,00 por mês por cluster adicional | o crédito de US$ 74,40 cobre só um cluster; agrupar ambientes em namespaces do mesmo cluster tem custo de isolamento a avaliar |
 | Descontos por uso comprometido | não calculado | Depois de 3 a 6 meses de uso estável, avaliar com os dados reais |
+
+### Pods Spot
+
+Preço oficial de São Paulo, lido na mesma página e data dos demais: vCPU US$ 0,0212 por hora e memória US$ 0,0023449 por GiB-hora, contra 0,0707 e 0,0078164 sob demanda (cerca de 30%).
+
+| Caso | Sob demanda | Spot | Economia | Cálculo do Spot |
+|---|---|---|---|---|
+| Cenário A inteiro (2,0 vCPU e 4 GiB) | 126,05 | **37,80** | **88,25** | (2,0 x 0,0212 + 4 x 0,0023449) x 730 |
+| Relay no cenário B (2 pods de 0,25 vCPU e 0,5 GiB, 0,5 vCPU e 1 GiB no total) | 31,51 | **9,45** | **22,06** | (0,5 x 0,0212 + 1 x 0,0023449) x 730 |
+
+**Spot só serve ao que tolera interrupção.** O Google pode retomar um pod Spot a qualquer momento, com aviso curto. Para esta solução:
+
+| Componente | Spot? | Por quê |
+|---|---|---|
+| Consumidor | **Sim, com ressalva** | Idempotente ([ADR-007](adrs/ADR-007-idempotencia.md)): a mensagem em processamento volta e é reaplicada sem duplicar. A ressalva é que hoje o consumidor roda **dentro do pod do consolidado**, junto com a API de leitura; usar Spot só para ele exige separá-lo num Deployment próprio, e isso não existe no código. Enquanto estiver junto, o pod do consolidado não pode ser Spot em produção |
+| Relay | **Sim, com ressalva** | Retomar o relay só atrasa a publicação, e `FOR UPDATE SKIP LOCKED` com duas réplicas evita a duplicação ([ADR-008](adrs/ADR-008-relay-processo-separado.md)). A ressalva é o atraso de consistência (`consolidado_evento_lag_seconds`, que o RNF-05 limita em cerca de 5 s) durante a troca de pod, e a retomada simultânea das duas réplicas deixaria o outbox acumular até um pod novo subir (dezenas de segundos, a medir). O encerramento gracioso existe (RNF-10), mas o prazo de aviso do Spot não foi confirmado e pode ser menor que o do desligamento normal. Manter ao menos uma réplica sob demanda |
+| API de lançamentos | **Não** | Está no caminho de escrita e a disponibilidade do lançamentos é requisito (RNF-01) |
+| API do consolidado | **Não** | Está no caminho de leitura do requisito de 50 req/s |
+| Keycloak | **Não** | A emissão de token para integradores depende dele, e o modo de produção tem estado e sessão |
+
+O **cenário A**, por ser homologação que aceita parada, pode usar Spot em tudo: é o caso da primeira linha. Nenhum número de Spot deste documento foi medido; o risco de interrupção não tem preço na tabela e precisa ser observado em operação.
 
 Práticas de governança de custo (aproveitadas de um estudo anterior do mesmo autor, sem os números dele):
 - **Rótulos obrigatórios** em todos os recursos: `env`, `owner`, `cost-center`, `app`, `team`, para atribuir custo por ambiente e por equipe.
