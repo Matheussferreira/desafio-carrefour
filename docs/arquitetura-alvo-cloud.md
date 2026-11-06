@@ -2,7 +2,7 @@
 
 Mapeamento do ambiente local para o Google Cloud na região `southamerica-east1` (São Paulo), com as adaptações de alta disponibilidade para produção. A empresa usa o Google Cloud, então esta é a nuvem alvo. Os números de capacidade e custo estão em [dimensionamento.md](dimensionamento.md) e [custos.md](custos.md), e a recuperação de desastres em [disaster-recovery.md](disaster-recovery.md). Nada aqui foi implantado: é desenho alvo, e não há infraestrutura como código do Google Cloud no repositório ([evolucoes.md](evolucoes.md)).
 
-**O que muda no código em relação ao ambiente local.** Quase nada, com uma exceção importante: em produção o broker é o **Pub/Sub**, e o código de hoje só tem o adaptador de RabbitMQ (AMQP). Criar o adaptador do Pub/Sub é trabalho de código, descrito no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). Todo o resto (PostgreSQL, Redis, OIDC, OTLP, Prometheus) são protocolos abertos e entram por configuração.
+O que muda no código em relação ao ambiente local. Quase nada, com uma exceção importante: em produção o broker é o **Pub/Sub**, e o código de hoje só tem o adaptador de RabbitMQ (AMQP). Criar o adaptador do Pub/Sub é trabalho de código, descrito no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). Todo o resto (PostgreSQL, Redis, OIDC, OTLP, Prometheus) são protocolos abertos e entram por configuração.
 
 ## Decisão de plataforma: GKE Autopilot ou Cloud Run
 
@@ -18,7 +18,7 @@ Três dos quatro componentes de aplicação são **processos contínuos**: o `la
 | Custo ocioso | Cobra os recursos pedidos pelos pods | Escala a zero nas APIs |
 | Acesso privado ao Cloud SQL e ao Memorystore | Rede da própria VPC | Conector de VPC ou saída direta para a VPC |
 
-**Decisão: GKE Autopilot para os quatro componentes** (`lancamentos`, `lancamentos-relay`, `consolidado` com o consumidor e o Keycloak). O Autopilot elimina a gestão de nós (o Google cuida de patches, capacidade e segurança dos nós), cobra pelos recursos que os pods pedem e dá um único modelo de operação, probes e implantação. O Cloud Run continua sendo uma opção legítima **só para as APIs HTTP**; entraria se o custo ocioso virasse relevante, e o relay e o consumidor ficariam no GKE de qualquer forma. Esta decisão é uma escolha entre duas boas opções, e o argumento a favor do Autopilot é a simplicidade operacional para uma equipe pequena.
+Decisão: GKE Autopilot para os quatro componentes (`lancamentos`, `lancamentos-relay`, `consolidado` com o consumidor e o Keycloak). O Autopilot elimina a gestão de nós (o Google cuida de patches, capacidade e segurança dos nós), cobra pelos recursos que os pods pedem e dá um único modelo de operação, probes e implantação. O Cloud Run continua sendo uma opção legítima só para as APIs HTTP; entraria se o custo ocioso virasse relevante, e o relay e o consumidor ficariam no GKE de qualquer forma. Esta decisão é uma escolha entre duas boas opções, e o argumento a favor do Autopilot é a simplicidade operacional para uma equipe pequena.
 
 O repositório de referência do mesmo autor para outro desafio escolheu o Cloud Run para o consolidado porque ali o consumo era acionado por eventos (push). Aqui o consumidor é uma assinatura de pull com controle de fluxo, que é o modelo do código atual, e o consolidado também serve a API de leitura no mesmo processo.
 
@@ -88,7 +88,7 @@ graph LR
     IAP["IAP<br/>acesso administrativo"] -.-> PODS
 ```
 
-O Keycloak aparece como componente próprio porque é o que o código usa hoje. O **Identity Platform não substitui o Keycloak** neste caso: ele é voltado a usuários finais, e o consumo desta solução é de máquina a máquina (*client credentials*). Detalhes em [custos.md](custos.md) e no [ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
+O Keycloak aparece como componente próprio porque é o que o código usa hoje. O Identity Platform não substitui o Keycloak neste caso: ele é voltado a usuários finais, e o consumo desta solução é de máquina a máquina (*client credentials*). Detalhes em [custos.md](custos.md) e no [ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
 
 ---
 
@@ -100,8 +100,8 @@ O Keycloak aparece como componente próprio porque é o que o código usa hoje. 
 | `lancamentos-relay` (contêiner) | GKE Autopilot | Várias réplicas são seguras por causa do `FOR UPDATE SKIP LOCKED` |
 | `consolidado` (contêiner) | GKE Autopilot | API de leitura e consumidor no mesmo processo |
 | Keycloak (contêiner) | GKE Autopilot | Modo de produção, com PostgreSQL e TLS. O acesso ao console administrativo é pelo IAP, sem exposição pública |
-| PostgreSQL único com 2 bancos | **Duas instâncias Cloud SQL for PostgreSQL**, HA regional | Local: dois bancos na mesma instância por simplicidade. Produção: instâncias separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md). O banco do Keycloak fica como um terceiro banco na instância de lançamentos. Conexão por IP privado e pelo Cloud SQL Auth Proxy ou conector, com autenticação IAM quando possível |
-| RabbitMQ (single-node) | **Pub/Sub** | Tópico de eventos, assinatura do consolidado e tópico de mensagens mortas. Exige o adaptador descrito no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). O RabbitMQ continua no ambiente local e nos testes |
+| PostgreSQL único com 2 bancos | Duas instâncias Cloud SQL for PostgreSQL, HA regional | Local: dois bancos na mesma instância por simplicidade. Produção: instâncias separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md). O banco do Keycloak fica como um terceiro banco na instância de lançamentos. Conexão por IP privado e pelo Cloud SQL Auth Proxy ou conector, com autenticação IAM quando possível |
+| RabbitMQ (single-node) | Pub/Sub | Tópico de eventos, assinatura do consolidado e tópico de mensagens mortas. Exige o adaptador descrito no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). O RabbitMQ continua no ambiente local e nos testes |
 | Redis (single-node) | Memorystore for Redis, nível Standard | Réplica em outra zona com failover automático. Cluster não é necessário a este volume |
 | Proxy local | Cloud Load Balancing (balanceador de aplicação externo) | Roteamento por caminho, TLS, health check em `/ready` (ver nota abaixo) |
 | (sem equivalente) | Cloud Armor | Regras OWASP pré-configuradas e limite por IP na borda |
@@ -113,9 +113,9 @@ O Keycloak aparece como componente próprio porque é o que o código usa hoje. 
 | Dockerfile | Artifact Registry | Registro privado com varredura de vulnerabilidades. A imagem é multi-stage, roda como o usuário `node` e leva só o código compilado e as dependências de produção |
 | Logs de auditoria | Cloud Audit Logs com bucket de retenção bloqueada | Ver [seguranca.md](seguranca.md) |
 
-> **Health check do balanceador.** Pode usar `/ready`: o do consolidado depende só do PostgreSQL e da conexão com o broker, e o Redis, que é cache, fica de fora de propósito. Uma queda do cache não tira pods do balanceador (cenário C do [teste de resiliência](../tests/resiliencia/resiliencia.ps1)). `/health` serve como sonda de vivacidade do Kubernetes.
+> Health check do balanceador. Pode usar `/ready`: o do consolidado depende só do PostgreSQL e da conexão com o broker, e o Redis, que é cache, fica de fora de propósito. Uma queda do cache não tira pods do balanceador (cenário C do [teste de resiliência](../tests/resiliencia/resiliencia.ps1)). `/health` serve como sonda de vivacidade do Kubernetes.
 
-> **Bancos separados.** Um VACUUM agressivo ou um pool esgotado numa instância não afeta a outra, as políticas de backup são independentes e a capacidade acompanha o perfil de cada uma: lançamentos é de escrita, consolidado é de leitura.
+> Bancos separados. Um VACUUM agressivo ou um pool esgotado numa instância não afeta a outra, as políticas de backup são independentes e a capacidade acompanha o perfil de cada uma: lançamentos é de escrita, consolidado é de leitura.
 
 ### Cloud Armor, API Gateway e Apigee
 
@@ -127,7 +127,7 @@ O Keycloak aparece como componente próprio porque é o que o código usa hoje. 
 
 ## Identidade e acesso: menor privilégio
 
-Cada serviço usa uma **conta de serviço do Google própria**, ligada à conta de serviço do Kubernetes por **Workload Identity Federation for GKE**. Não existe chave de conta de serviço baixada nem segredo de nuvem em variável de ambiente.
+Cada serviço usa uma conta de serviço do Google própria, ligada à conta de serviço do Kubernetes por Workload Identity Federation for GKE. Não existe chave de conta de serviço baixada nem segredo de nuvem em variável de ambiente.
 
 | Serviço | Papéis (em nível de recurso, não de projeto) |
 |---|---|
@@ -149,26 +149,26 @@ Nenhum serviço administra tópicos, assinaturas nem segredos: isso é feito pel
 ## Rede e perímetro
 
 - **Cluster privado**, sem IP público nos nós. O acesso aos serviços do Google é pelo acesso privado do Google; o Cloud SQL e o Memorystore são alcançados por IP privado (acesso a serviços privados).
-- **Saída para a internet:** nenhum componente precisa sair para a internet (o JWKS é interno e o Pub/Sub, o Secret Manager e o Artifact Registry são acessados de forma privada). Por isso o **Cloud NAT não está nos cenários de custo**. Ele entra só se algum componente passar a precisar de saída (por exemplo, envio de e-mail pelo Keycloak).
-- **VPC Service Controls:** um perímetro de serviço em torno de Cloud SQL, Pub/Sub, Secret Manager, Cloud KMS e Cloud Storage reduz o risco de exfiltração de dados por credencial comprometida. Exige planejar as exceções (por exemplo, o pipeline de implantação) e começar em modo de teste (*dry run*).
-- **Acesso administrativo:** IAP para o console do Keycloak e para o acesso aos recursos, sem bastion e sem SSH exposto.
+- Saída para a internet: nenhum componente precisa sair para a internet (o JWKS é interno e o Pub/Sub, o Secret Manager e o Artifact Registry são acessados de forma privada). Por isso o Cloud NAT não está nos cenários de custo. Ele entra só se algum componente passar a precisar de saída (por exemplo, envio de e-mail pelo Keycloak).
+- VPC Service Controls: um perímetro de serviço em torno de Cloud SQL, Pub/Sub, Secret Manager, Cloud KMS e Cloud Storage reduz o risco de exfiltração de dados por credencial comprometida. Exige planejar as exceções (por exemplo, o pipeline de implantação) e começar em modo de teste (*dry run*).
+- Acesso administrativo: IAP para o console do Keycloak e para o acesso aos recursos, sem bastion e sem SSH exposto.
 - **Políticas de rede** do Kubernetes entre namespaces: os pods de lançamentos não falam com o Redis, e os do consolidado não escrevem no banco de lançamentos.
 
 ---
 
 ## Escalabilidade e alta disponibilidade
 
-**Lançamentos (escrita):**
+Lançamentos (escrita):
 - HPA por CPU (alvo de 60%), no mínimo 2 pods em zonas diferentes.
 - O relay é um serviço à parte: N pods são N relays em paralelo, que dividem o trabalho com `SKIP LOCKED` sem duplicar eventos.
 - Cloud SQL com HA regional (réplica síncrona em outra zona e failover automático).
 
-**Consolidado (leitura):**
+Consolidado (leitura):
 - Escala por CPU e, para o consumidor, pelo atraso da assinatura (métrica do Pub/Sub exposta ao HPA), no mínimo 2 pods.
 - O Redis absorve a leitura repetida; com falha do cache a leitura cai para o banco.
 - O controle de fluxo da assinatura em 1 mensagem por vez equivale ao `prefetch=1` de hoje: N pods são N mensagens em processamento, sem coordenação.
 
-**Pub/Sub:**
+Pub/Sub:
 - Serviço regional gerenciado, com as mensagens replicadas entre zonas. A retenção da assinatura e do tópico guarda as mensagens enquanto o consolidado está fora.
 - A assinatura tem política de mensagens mortas. O reprocessamento é manual hoje ([disaster-recovery.md](disaster-recovery.md)).
 
@@ -176,7 +176,7 @@ Nenhum serviço administra tópicos, assinaturas nem segredos: isso é feito pel
 
 ## Equivalência em outras nuvens
 
-A solução fala protocolos abertos (HTTP, OIDC, PostgreSQL, AMQP 0-9-1 no ambiente local, protocolo do Redis, OTLP) e roda em contêineres comuns. **Nenhum componente do código depende de um serviço proprietário de uma nuvem específica**, exceto o adaptador do broker, que é a única parte a escrever para cada nuvem. A tabela abaixo é só uma equivalência de componentes; não há estimativa de custo para as outras duas nuvens.
+A solução fala protocolos abertos (HTTP, OIDC, PostgreSQL, AMQP 0-9-1 no ambiente local, protocolo do Redis, OTLP) e roda em contêineres comuns. Nenhum componente do código depende de um serviço proprietário de uma nuvem específica, exceto o adaptador do broker, que é a única parte a escrever para cada nuvem. A tabela abaixo é só uma equivalência de componentes; não há estimativa de custo para as outras duas nuvens.
 
 | Componente | Google Cloud (este documento) | AWS | Azure |
 |---|---|---|---|

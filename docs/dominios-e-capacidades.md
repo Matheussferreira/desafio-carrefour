@@ -2,7 +2,7 @@
 
 ## Por que dois bounded contexts
 
-O sistema tem dois bounded contexts porque possuem **invariantes distintas, ciclos de mudança diferentes e requisitos de disponibilidade incompatíveis**:
+O sistema tem dois bounded contexts porque possuem invariantes distintas, ciclos de mudança diferentes e requisitos de disponibilidade incompatíveis:
 
 | Critério | BC: Registro de Lançamentos | BC: Consolidação Financeira |
 |---|---|---|
@@ -39,7 +39,7 @@ Colocar os dois no mesmo processo os tornaria **cúmplices em falha**: um crash 
 |---|---|
 | **Saldo Diário** | Projeção por comerciante e data: `total_creditos`, `total_debitos`, resultado do dia (`creditos - debitos`); armazenado em `saldo_diario`. O **saldo acumulado** é a soma do resultado do dia até a data, calculada na consulta (ver ADR-009) |
 | **Evento Processado** | Registro na tabela `eventos_processados` de um `eventoId` já aplicado ao saldo; garante idempotência do consumer |
-| **Cache de Saldo** | Representação em Redis do saldo de uma data; TTL de 60s; **não é fonte de verdade**, pode ser descartado a qualquer momento |
+| **Cache de Saldo** | Representação em Redis do saldo de uma data; TTL de 60s; não é fonte de verdade, pode ser descartado a qualquer momento |
 | **Consistência Eventual** | O saldo reflete todos os lançamentos em até 5s após o registro; um GET durante esse intervalo pode retornar saldo desatualizado por no máximo o tempo de propagação do evento |
 | **DLQ** | `consolidado.lancamentos.dlq`, destino de mensagens que nunca vão passar: JSON quebrado, contrato inválido (versão 2.x) ou erro permanente depois de 1 tentativa inicial + 3 retries. Falha de banco ou de conexão não manda para lá (a mensagem fica retida até o banco voltar). Requer intervenção para replay (`scripts/reprocessar-dlq`) ou descarte |
 
@@ -94,12 +94,12 @@ graph LR
 
 O evento `LancamentoRegistrado` é o **único ponto de integração** entre os dois bounded contexts. Esse contrato foi desenhado com as seguintes garantias:
 
-1. **O Consolidado nunca acessa o banco do Lançamentos.** O saldo é sempre calculado a partir dos eventos, não de leitura direta na fonte.
-2. **O payload do evento carrega apenas o fato bruto** (valor, tipo, data de competência), a lógica de acumulação (crédito soma, débito subtrai) é responsabilidade exclusiva do Consolidado.
-3. **O Consolidado pode ser reconstruído do zero** somente se o serviço Lançamentos republicar os eventos da tabela `outbox` no broker, o Consolidado não tem acesso ao `outbox` nem ao `lancamentos_db`. A reconstrução é uma operação operacional (não um fluxo de produto) e requer que o serviço Lançamentos exponha um mecanismo de replay. Isso exclui tecnicamente o RabbitMQ puro (sem persistência de histórico) como fonte de verdade para replay; uma evolução futura seria usar um event store dedicado (ex: EventStoreDB) que permita replay sem acoplamento operacional.
-4. **Mudanças de schema são versionadas** via `schemaVersion` no payload, permite transição sem deploy coordenado dos dois serviços.
+1. O Consolidado nunca acessa o banco do Lançamentos. O saldo é sempre calculado a partir dos eventos, não de leitura direta na fonte.
+2. O payload do evento carrega apenas o fato bruto (valor, tipo, data de competência), a lógica de acumulação (crédito soma, débito subtrai) é responsabilidade exclusiva do Consolidado.
+3. O Consolidado pode ser reconstruído do zero somente se o serviço Lançamentos republicar os eventos da tabela `outbox` no broker, o Consolidado não tem acesso ao `outbox` nem ao `lancamentos_db`. A reconstrução é uma operação operacional (não um fluxo de produto) e requer que o serviço Lançamentos exponha um mecanismo de replay. Isso exclui tecnicamente o RabbitMQ puro (sem persistência de histórico) como fonte de verdade para replay; uma evolução futura seria usar um event store dedicado (ex: EventStoreDB) que permita replay sem acoplamento operacional.
+4. Mudanças de schema são versionadas via `schemaVersion` no payload, permite transição sem deploy coordenado dos dois serviços.
 
-Violações do ACL que **nunca devem ocorrer:**
+Violações do ACL que nunca devem ocorrer:
 
 - JOIN ou query cruzando `lancamentos_db` e `consolidado_db`
 - O Consolidado expor endpoints de escrita que o Lançamentos chame diretamente

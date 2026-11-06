@@ -4,7 +4,7 @@ Cenário curto usado nas medições: tests/load/curto.js (só cache_hit, 50 req/
 
 ==============================================================================
 1. Bisect por commit (stack nova por commit, tracing conforme o commit, 2 rodadas)
-   Commits: 98f9fb2 fim da fase 2 | fa194eb fim da fase 3 | 5b5ed52 | c9da582 helmet e limite | 7be182e métricas e OpenTelemetry | 71a4ce2 HEAD da fase 4
+   Commits: 98f9fb2 antes da autenticação por Keycloak | fa194eb com autenticação por Keycloak | 5b5ed52 | c9da582 helmet e limite | 7be182e métricas e OpenTelemetry | 71a4ce2 versão com tracing ligado por padrão
    f53f023 não altera services/ nem o compose; 571b8a5 altera só o compose (volume de evidências e sintaxe da variável do OTel).
 ==============================================================================
 == 98f9fb2 | auth=login | run 1

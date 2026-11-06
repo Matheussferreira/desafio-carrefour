@@ -1,5 +1,5 @@
 /**
- * Teste de carga k6 (Fase 4)
+ * Teste de carga k6 do consolidado
  *
  * PROVA o requisito NF-02:
  *   "Em dias de pico, o serviço de consolidado recebe 50 req/s,

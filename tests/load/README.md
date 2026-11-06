@@ -7,7 +7,7 @@ Cinco scripts. Todos obtêm o token no Keycloak (client credentials) no `setup()
 | `consolidado.js` | 50 req/s com cache quente e frio (requisito de 50 req/s e menos de 5% de perda) e um pico de 200 req/s acima da cota do limitador | `docker compose --profile loadtest run --rm k6` |
 | `limite-429.js` | Prova determinística do 429: sobe o consolidado com `RATE_LIMIT_MAX=300` e envia 700 requisições seguidas; exige 429 com `Retry-After` | `.\tests\load\limite-429.ps1` ou `bash tests/load/limite-429.sh` |
 | `historico-longo.js` | 3 anos de lançamentos diários de um comerciante; custo do saldo acumulado e conferência do valor em 1095 datas | `docker compose --profile loadtest run --rm k6 run /scripts/historico-longo.js` |
-| `curto.js` | Só `cache_hit`, 50 req/s por 30 s, para medir rápido ou comparar versões e configurações (`AUTH=login` para os commits anteriores à fase 3) | `docker compose --profile loadtest run --rm k6 run /scripts/curto.js` |
+| `curto.js` | Só `cache_hit`, 50 req/s por 30 s, para medir rápido ou comparar versões e configurações (`AUTH=login` para os commits anteriores à autenticação por Keycloak, até `98f9fb2`) | `docker compose --profile loadtest run --rm k6 run /scripts/curto.js` |
 | `ablacao.js` | 50 req/s na mesma data por 45 s, para comparar configurações da mesma stack (por exemplo com e sem tracing) | `docker compose --profile loadtest run --rm k6 run /scripts/ablacao.js` |
 
 No PowerShell o caminho `/scripts/...` é passado como está. No Git Bash, prefixe o comando com `MSYS_NO_PATHCONV=1` para o caminho não ser convertido para um caminho do Windows.
@@ -77,7 +77,7 @@ Nas três execuções finais a mediana ficou em cerca de 5 ms, mas apareceram re
 
 ### A degradação encontrada
 
-Depois da fase 4, o `consolidado.js` passou a falhar nos limites de latência (mediana de 0,7 a 3 s e p95 de 4 a 20 s no `cache_hit`, sem 429 no pico porque o serviço não passava de cerca de 25 req/s). A investigação está em `docs/evidencias/regressao-latencia.txt`:
+Na versão com tracing ligado por padrão (commit `71a4ce2`), o `consolidado.js` passou a falhar nos limites de latência (mediana de 0,7 a 3 s e p95 de 4 a 20 s no `cache_hit`, sem 429 no pico porque o serviço não passava de cerca de 25 req/s). A investigação está em `docs/evidencias/regressao-latencia.txt`:
 
 - O bisect de seis commits, cada um em stack nova com o cenário curto (`curto.js`: só `cache_hit`, 50 req/s, 30 s), não mostrou um commit que degrade de forma estável. O mesmo commit variou de 8 a 473 ms de p95 entre rodadas.
 - Na stack principal reproduzi a degradação: com o tracing ligado deu p95 de 935 ms com o Jaeger ausente e de 2,0 s com o Jaeger no ar, com o consolidado a 96% e 145% de CPU (no `docker stats` que você mandou ele estava a 152%). Com o tracing desligado a degradação também apareceu em algumas rodadas, então o tracing agrava, mas não explica tudo.

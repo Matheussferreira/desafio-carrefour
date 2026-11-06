@@ -13,7 +13,7 @@ O requisito não funcional que governa esta decisão foi enunciado de forma expl
 
 > "O serviço de Lançamentos **nunca** pode ficar indisponível em função de falha no serviço de Consolidado."
 
-Este ADR foi revisado para registrar com mais honestidade um ponto: **um monólito modular seria uma resposta defensável** a este problema, e a decisão por dois processos se apoia em um único argumento, o requisito acima, não em preferência por microsserviços.
+Este ADR foi revisado para registrar com mais honestidade um ponto: um monólito modular seria uma resposta defensável a este problema, e a decisão por dois processos se apoia em um único argumento, o requisito acima, não em preferência por microsserviços.
 
 ---
 
@@ -45,39 +45,39 @@ Note que o RNF não exige **microsserviços** no sentido organizacional (times i
 
 Um único processo Node.js com dois módulos internos separados (`lancamentos/` e `consolidado/`), compartilhando ou não o banco.
 
-**O que ela teria de bom.** A 50 req/s, um monólito modular bem estruturado atende o volume com folga. Haveria menos complexidade operacional, nenhuma necessidade de broker para integrar os módulos (uma chamada de função, ou um barramento em memória), transações entre os dois domínios triviais, uma única imagem e um único deploy, e observabilidade e depuração mais simples (um único trace, sem propagação de contexto por mensageria). Para uma equipe pequena ou um MVP, é um ponto de partida correto, e o próprio enunciado de volume não pede mais do que isso.
+O que ela teria de bom. A 50 req/s, um monólito modular bem estruturado atende o volume com folga. Haveria menos complexidade operacional, nenhuma necessidade de broker para integrar os módulos (uma chamada de função, ou um barramento em memória), transações entre os dois domínios triviais, uma única imagem e um único deploy, e observabilidade e depuração mais simples (um único trace, sem propagação de contexto por mensageria). Para uma equipe pequena ou um MVP, é um ponto de partida correto, e o próprio enunciado de volume não pede mais do que isso.
 
-**Por que não resolve este requisito.** Ver a tabela acima: memória, event loop, falha não tratada e deploy compartilhados. Quando o enunciado diz "nunca pode ficar indisponível em função de falha no Consolidado", a primeira pergunta de um arquiteto é "o que acontece se o consolidado travar?". No monólito, a resposta é "o lançamento trava também". Aceitar isso seria reinterpretar o requisito como "indisponível por erro de lógica", o que é uma leitura mais fraca do que a escrita.
+Por que não resolve este requisito. Ver a tabela acima: memória, event loop, falha não tratada e deploy compartilhados. Quando o enunciado diz "nunca pode ficar indisponível em função de falha no Consolidado", a primeira pergunta de um arquiteto é "o que acontece se o consolidado travar?". No monólito, a resposta é "o lançamento trava também". Aceitar isso seria reinterpretar o requisito como "indisponível por erro de lógica", o que é uma leitura mais fraca do que a escrita.
 
-**Quando a decisão deveria ser revista.** Se o negócio aceitar uma indisponibilidade conjunta e curta (por exemplo, com várias réplicas do monólito e deploy sem parada), a Opção A volta a ser a melhor, porque o custo operacional dos dois processos deixa de se pagar. Também se o volume ficar muito abaixo do projetado e a equipe for de uma ou duas pessoas.
+Quando a decisão deveria ser revista. Se o negócio aceitar uma indisponibilidade conjunta e curta (por exemplo, com várias réplicas do monólito e deploy sem parada), a Opção A volta a ser a melhor, porque o custo operacional dos dois processos deixa de se pagar. Também se o volume ficar muito abaixo do projetado e a equipe for de uma ou duas pessoas.
 
 ### Opção B: monólito com circuit breaker interno
 
 Módulos separados no mesmo processo com um circuit breaker entre eles (por exemplo, `opossum`).
 
-**Por que foi descartada.** Mitiga falha de lógica, não de processo (OOM, crash nativo, deploy). O esforço de ajustar breakers é comparável ao de manter dois contêineres leves, sem o ganho de isolamento real.
+Por que foi descartada. Mitiga falha de lógica, não de processo (OOM, crash nativo, deploy). O esforço de ajustar breakers é comparável ao de manter dois contêineres leves, sem o ganho de isolamento real.
 
 ### Opção C: três ou mais microsserviços
 
 Separar também o consumidor e a API de cada domínio em processos distintos.
 
-**Por que foi descartada.** Sem ganho mensurável a este volume. Aumenta a superfície operacional (imagens, healthchecks, rede interna) sem resolver um problema real. O consumidor é parte natural do processo do consolidado. O relay é a exceção, separado por motivos próprios (ADR-008).
+Por que foi descartada. Sem ganho mensurável a este volume. Aumenta a superfície operacional (imagens, healthchecks, rede interna) sem resolver um problema real. O consumidor é parte natural do processo do consolidado. O relay é a exceção, separado por motivos próprios (ADR-008).
 
 ---
 
 ## Consequências
 
-**Ganhos reais com essa decisão:**
+Ganhos reais com essa decisão:
 - Isolamento de processo: crash, OOM ou deploy do consolidado não interrompe o lançamentos. O teste `tests/resiliencia` (cenário A) prova o comportamento com o consolidado parado.
 - Deploy e escala independentes: o consolidado, que é de leitura intensiva, escala sem escalar o lançamentos.
 
-**Custos reais com essa decisão:**
+Custos reais com essa decisão:
 - Comunicação assíncrona obrigatória: não há transação distribuída simples, e a consistência eventual é consequência da arquitetura, não uma escolha opcional (ADR-002).
 - Mais complexidade operacional: dois conjuntos de logs, métricas, healthchecks e imagens (três com o relay), um broker, um outbox e um consumidor idempotente. Tudo isso existe por causa desta decisão e não existiria no monólito.
 - Observabilidade mais trabalhosa: uma requisição atravessa dois serviços e um broker. Mitigado com `correlationId` no evento e com propagação do `traceparent` na mensagem (ver [observabilidade.md](../observabilidade.md)), mas ainda inferior a um processo único.
 - Custo de infraestrutura maior (ver [custos.md](../custos.md)): mais tarefas, dois bancos e um broker em cluster.
 
-**O que eu faria em uma greenfield real com este volume e sem o RNF:** monólito modular primeiro, com interfaces bem definidas entre os módulos de lançamentos e de consolidado e um contrato de eventos já pronto (dentro do processo). Extrairia o consolidado para outro processo quando surgisse um requisito que o monólito não atendesse: escala assimétrica, equipes separadas ou exatamente esse requisito de disponibilidade independente. O desenho atual preserva essa possibilidade nos dois sentidos, porque o contrato entre os módulos já é o evento versionado ([eventos.md](../eventos.md)).
+O que eu faria em uma greenfield real com este volume e sem o RNF: monólito modular primeiro, com interfaces bem definidas entre os módulos de lançamentos e de consolidado e um contrato de eventos já pronto (dentro do processo). Extrairia o consolidado para outro processo quando surgisse um requisito que o monólito não atendesse: escala assimétrica, equipes separadas ou exatamente esse requisito de disponibilidade independente. O desenho atual preserva essa possibilidade nos dois sentidos, porque o contrato entre os módulos já é o evento versionado ([eventos.md](../eventos.md)).
 
 ## Atualização (ADR-008)
 

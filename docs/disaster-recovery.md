@@ -1,26 +1,26 @@
 # Recuperação de desastres
 
-Este documento define metas de recuperação (RTO e RPO), a estratégia de backup e o roteiro de operação para a solução no Google Cloud, na região primária `southamerica-east1` (São Paulo). Parte da estrutura vem de um estudo anterior do mesmo autor para outro desafio e foi **reescrita para as particularidades desta solução** (outbox, consumidor idempotente, projeção reconstruível) e para a restrição de residência de dados descrita abaixo.
+Este documento define metas de recuperação (RTO e RPO), a estratégia de backup e o roteiro de operação para a solução no Google Cloud, na região primária `southamerica-east1` (São Paulo). Parte da estrutura vem de um estudo anterior do mesmo autor para outro desafio e foi reescrita para as particularidades desta solução (outbox, consumidor idempotente, projeção reconstruível) e para a restrição de residência de dados descrita abaixo.
 
 **Status:** são metas de projeto. Nenhuma foi medida numa conta do Google Cloud e nenhum failover regional foi exercitado. O que existe como prova automatizada é a resiliência a falha de componente no ambiente local, descrita no fim.
 
 ## O que torna esta solução diferente para DR
 
-1. **O `lancamentos_db` é a fonte de verdade.** Perder um lançamento é perder dinheiro registrado. É o único dado que exige RPO próximo de zero.
-2. **O `consolidado_db` é uma projeção.** Cada linha de `saldo_diario` é derivada de eventos. Se for perdido, pode ser reconstruído a partir do `outbox` do lançamentos, desde que o consumidor seja idempotente (ele é, pela tabela `eventos_processados`). Por isso o RPO lógico do consolidado é zero, e o que varia é o tempo de reconstrução.
-3. **O broker não guarda a verdade.** O `outbox` mantém todo evento gravado, publicado ou não (nenhuma rotina apaga linhas hoje). Perder o Pub/Sub ou o conteúdo de uma assinatura perde mensagens em trânsito, não lançamentos.
-4. **O Redis é só cache.** Pode ser recriado vazio a qualquer momento.
+1. O `lancamentos_db` é a fonte de verdade. Perder um lançamento é perder dinheiro registrado. É o único dado que exige RPO próximo de zero.
+2. O `consolidado_db` é uma projeção. Cada linha de `saldo_diario` é derivada de eventos. Se for perdido, pode ser reconstruído a partir do `outbox` do lançamentos, desde que o consumidor seja idempotente (ele é, pela tabela `eventos_processados`). Por isso o RPO lógico do consolidado é zero, e o que varia é o tempo de reconstrução.
+3. O broker não guarda a verdade. O `outbox` mantém todo evento gravado, publicado ou não (nenhuma rotina apaga linhas hoje). Perder o Pub/Sub ou o conteúdo de uma assinatura perde mensagens em trânsito, não lançamentos.
+4. O Redis é só cache. Pode ser recriado vazio a qualquer momento.
 
 ## Restrição de residência: a única região do Brasil é `southamerica-east1`
 
-O Google Cloud tem **uma única região no Brasil**, `southamerica-east1` (São Paulo). As regiões mais próximas ficam fora do país (por exemplo, `southamerica-west1`, em Santiago, no Chile). Replicar dados para outra região é, portanto, **transferência internacional de dados pessoais** pela LGPD, e a `descricao` do lançamento pode conter dado pessoal ([seguranca.md](seguranca.md)). Isso não é uma decisão de arquitetura; é de compliance e do negócio. Há dois caminhos:
+O Google Cloud tem uma única região no Brasil, `southamerica-east1` (São Paulo). As regiões mais próximas ficam fora do país (por exemplo, `southamerica-west1`, em Santiago, no Chile). Replicar dados para outra região é, portanto, transferência internacional de dados pessoais pela LGPD, e a `descricao` do lançamento pode conter dado pessoal ([seguranca.md](seguranca.md)). Isso não é uma decisão de arquitetura; é de compliance e do negócio. Há dois caminhos:
 
 | Alternativa | O que oferece | O que não oferece | O que é preciso |
 |---|---|---|---|
-| **A. DR multizona dentro de `southamerica-east1`** (padrão desta proposta) | Sobrevive à falha de uma zona, de forma automática | **Não sobrevive à falha da região inteira.** Numa falha regional, a solução fica indisponível até o Google restabelecer a região | Nada além da aprovação do risco residual |
-| **B. DR em outra região** (por exemplo `southamerica-west1`) | Sobrevive à falha regional, em modo *pilot light* | Mantém o dado pessoal fora do Brasil | Base legal e mecanismo de transferência da LGPD (por exemplo, as cláusulas-padrão contratuais previstas no regulamento de transferência internacional da ANPD), parecer do jurídico e do encarregado (DPO) e aprovação do compliance do banco |
+| A. DR multizona dentro de `southamerica-east1` (padrão desta proposta) | Sobrevive à falha de uma zona, de forma automática | Não sobrevive à falha da região inteira. Numa falha regional, a solução fica indisponível até o Google restabelecer a região | Nada além da aprovação do risco residual |
+| B. DR em outra região (por exemplo `southamerica-west1`) | Sobrevive à falha regional, em modo *pilot light* | Mantém o dado pessoal fora do Brasil | Base legal e mecanismo de transferência da LGPD (por exemplo, as cláusulas-padrão contratuais previstas no regulamento de transferência internacional da ANPD), parecer do jurídico e do encarregado (DPO) e aprovação do compliance do banco |
 
-Enquanto a alternativa B não for aprovada, **vale a A**, e as metas de falha regional abaixo ficam como desenho condicional. Para reduzir o risco da A sem transferir dado pessoal: manter os backups e as exportações **dentro de `southamerica-east1`**, restringir o armazenamento do Pub/Sub à região (política de armazenamento de mensagens) e manter o outbox como fonte para reconstruir a projeção.
+Enquanto a alternativa B não for aprovada, **vale a A**, e as metas de falha regional abaixo ficam como desenho condicional. Para reduzir o risco da A sem transferir dado pessoal: manter os backups e as exportações dentro de `southamerica-east1`, restringir o armazenamento do Pub/Sub à região (política de armazenamento de mensagens) e manter o outbox como fonte para reconstruir a projeção.
 
 ## Metas de recuperação
 
@@ -54,7 +54,7 @@ Os alvos são mais frouxos porque a região secundária fica em modo **pilot lig
 |---|---|---|
 | `lancamentos_db` | Backups automáticos do Cloud SQL e recuperação para qualquer instante (PITR), mais exportações mensais para um bucket do Cloud Storage em `southamerica-east1` | PITR pelo maior prazo permitido na edição (conferir o máximo na documentação) e 35 backups diários; 12 exportações mensais. O prazo regulatório de guarda de registros financeiros deve ser confirmado com o compliance |
 | `consolidado_db` | Backup automático, retenção menor | 14 backups; é derivável do outbox |
-| Cópia entre regiões | Replicação de backups para a região secundária, **sujeita à decisão da LGPD** acima | Mesma do banco de origem |
+| Cópia entre regiões | Replicação de backups para a região secundária, sujeita à decisão da LGPD acima | Mesma do banco de origem |
 | Keycloak | Banco com backup do Cloud SQL; definição do realm versionada em `keycloak/realm-caixa.json` | Mesma do banco |
 | Imagens | Artifact Registry. As imagens não contêm dado pessoal, então uma cópia em outra região não é transferência de dado pessoal (confirmar com o jurídico) | Últimas 10 versões |
 | Segredos | Secret Manager com replicação restrita a `southamerica-east1` por padrão; segredos de acesso são replicados à região secundária só se a alternativa B for aprovada | n/a |
@@ -66,7 +66,7 @@ O `outbox` cresce sem limite hoje (cerca de 0,8 KB por evento com índices, medi
 
 ## Roteiro de operação: falha da região primária (alternativa B)
 
-Comandos de CLI são ilustrativos e **precisam ser validados no primeiro exercício**. Os nomes dos recursos (`lancamentos-db-dr`, por exemplo) são exemplos.
+Comandos de CLI são ilustrativos e precisam ser validados no primeiro exercício. Os nomes dos recursos (`lancamentos-db-dr`, por exemplo) são exemplos.
 
 ### Fase 1: detecção
 
@@ -120,7 +120,7 @@ WHERE status = 'publicado' AND created_at >= '<T menos uma margem de segurança>
 
 ## Reprocessar a DLQ
 
-A DLQ recebe só mensagem que não vai passar: JSON quebrado, contrato inválido (por exemplo versão 2.x) ou erro permanente de processamento. Uma queda do banco, mesmo longa, **não** a enche: a mensagem fica retida e é aplicada na volta.
+A DLQ recebe só mensagem que não vai passar: JSON quebrado, contrato inválido (por exemplo versão 2.x) ou erro permanente de processamento. Uma queda do banco, mesmo longa, não a enche: a mensagem fica retida e é aplicada na volta.
 
 No **ambiente local (RabbitMQ)**, para devolver as mensagens da fila `consolidado.lancamentos.dlq` à fila principal depois de corrigir a causa:
 
@@ -132,7 +132,7 @@ No **ambiente local (RabbitMQ)**, para devolver as mensagens da fila `consolidad
 
 No Linux, macOS ou Git Bash: `bash scripts/reprocessar-dlq.sh [--simular] [--limite N]`. O script usa a API de gerenciamento do RabbitMQ (porta 15672) e precisa do Node 20. Cada mensagem é publicada na fila principal antes de a cópia da DLQ ser descartada; se a publicação não for confirmada, ela volta para a DLQ e o script para. Reentregar é seguro pela idempotência. Uma mensagem realmente inválida volta para a DLQ quando o consumidor a recusar de novo, e o script só processa as mensagens que a DLQ tinha ao começar, então não entra em laço.
 
-**Em produção com o Pub/Sub** este script não serve: ele fala com a API do RabbitMQ. O equivalente é ler a assinatura do tópico de mensagens mortas e republicar no tópico principal, e é parte do trabalho do adaptador ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)).
+Em produção com o Pub/Sub este script não serve: ele fala com a API do RabbitMQ. O equivalente é ler a assinatura do tópico de mensagens mortas e republicar no tópico principal, e é parte do trabalho do adaptador ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)).
 
 ## Política de teste
 
@@ -146,5 +146,5 @@ No Linux, macOS ou Git Bash: `bash scripts/reprocessar-dlq.sh [--simular] [--lim
 
 ## O que está provado e o que não está
 
-- **Provado por teste automatizado local** (ver [testes.md](testes.md)): lançamentos 201 com o consolidado parado e com o broker parado, drenagem do outbox na volta, convergência do saldo, idempotência de reentrega, reconexão do consumidor, 30 s de banco do consolidado fora sem nada na DLQ, consolidado pronto sem o Redis e reprocessamento da DLQ.
-- **Não provado:** qualquer comportamento do Pub/Sub (o adaptador não existe), failover do Cloud SQL, promoção de réplica entre regiões, redirecionamento do balanceador, replay completo do outbox em volume, restauração de backup. São metas de projeto até o primeiro exercício.
+- Provado por teste automatizado local (ver [testes.md](testes.md)): lançamentos 201 com o consolidado parado e com o broker parado, drenagem do outbox na volta, convergência do saldo, idempotência de reentrega, reconexão do consumidor, 30 s de banco do consolidado fora sem nada na DLQ, consolidado pronto sem o Redis e reprocessamento da DLQ.
+- Não provado: qualquer comportamento do Pub/Sub (o adaptador não existe), failover do Cloud SQL, promoção de réplica entre regiões, redirecionamento do balanceador, replay completo do outbox em volume, restauração de backup. São metas de projeto até o primeiro exercício.

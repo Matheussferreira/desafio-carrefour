@@ -13,12 +13,12 @@ Como dimensionar a solução no Google Cloud para o requisito de 50 req/s no con
 | Tamanho médio de uma linha | `lancamentos` 160 bytes, `outbox` 496 bytes; com índices, cerca de 1,2 KB por evento | Medido em 635 lançamentos locais, extrapolado |
 | Spans por trace de um lançamento (API, relay, consolidado) | 18 | Medido num trace do Jaeger |
 | Capacidade de um pod de 0,5 vCPU no GKE Autopilot | **desconhecida** | Hipótese a validar |
-| Vazão do consumidor (eventos por segundo) | **desconhecida** | Não medida |
+| Vazão do consumidor (eventos por segundo) | desconhecida | Não medida |
 | Comportamento com o Pub/Sub | **desconhecido** | O adaptador não existe ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)) |
 
 ## Demanda
 
-Lei de Little: requisições simultâneas = taxa de chegada x tempo de resposta. A 50 req/s, com mediana de 5 ms, há em média 0,25 requisição em andamento; mesmo com o p95 pior medido (141,7 ms) são cerca de 7. Em outras palavras, o consolidado **não é limitado por concorrência**, e sim pela CPU gasta por requisição (validação do JWT local, consulta ao Redis, serialização). Por isso o dimensionamento parte de CPU, não de número de conexões.
+Lei de Little: requisições simultâneas = taxa de chegada x tempo de resposta. A 50 req/s, com mediana de 5 ms, há em média 0,25 requisição em andamento; mesmo com o p95 pior medido (141,7 ms) são cerca de 7. Em outras palavras, o consolidado não é limitado por concorrência, e sim pela CPU gasta por requisição (validação do JWT local, consulta ao Redis, serialização). Por isso o dimensionamento parte de CPU, não de número de conexões.
 
 Eventos: 100 mil lançamentos por dia (premissa) são cerca de 1,2 evento por segundo em média. O broker não é limitado por vazão nesse volume; o Pub/Sub escala sem dimensionamento, e a franquia gratuita cobre a vazão ([custos.md](custos.md)).
 
@@ -41,7 +41,7 @@ As instâncias de banco usam a série de uso geral personalizada (`db-custom`). 
 
 ## Cenários de carga
 
-A tabela usa a fórmula `N = ceil(carga / (capacidade por pod x 0,6))`, com **capacidade por pod de 50 req/s como hipótese conservadora** (a vazão medida numa instância foi de cerca de 198 req/s em hardware sem o limite de 0,5 vCPU do pod) e 60% de utilização alvo. O mínimo é 2 pods por disponibilidade.
+A tabela usa a fórmula `N = ceil(carga / (capacidade por pod x 0,6))`, com capacidade por pod de 50 req/s como hipótese conservadora (a vazão medida numa instância foi de cerca de 198 req/s em hardware sem o limite de 0,5 vCPU do pod) e 60% de utilização alvo. O mínimo é 2 pods por disponibilidade.
 
 | Cenário | Carga | Pods do consolidado | O que muda além disso |
 |---|---|---|---|
@@ -49,21 +49,21 @@ A tabela usa a fórmula `N = ceil(carga / (capacidade por pod x 0,6))`, com **ca
 | Pico de 3x | 150 req/s | 5 | Verificar conexões ao banco (5 pods x 10 conexões do pool) |
 | Pico de 10x (por exemplo uma promoção) | 500 req/s | 17 | Ver abaixo |
 
-A 500 req/s com todas as requisições em cache frio, o banco receberia 500 consultas por segundo de cerca de 1 ms cada, o que ocupa em torno de meio núcleo (ordem de grandeza, a partir do `EXPLAIN`). Os 17 pods abririam cerca de 170 conexões (pool padrão de 10). O limite de conexões do Cloud SQL depende da memória da instância e **deve ser conferido na documentação** do Cloud SQL para a classe escolhida; passando dele, entra um agrupador de conexões (PgBouncer ou o recurso de pool gerenciado do Cloud SQL, se disponível na edição).
+A 500 req/s com todas as requisições em cache frio, o banco receberia 500 consultas por segundo de cerca de 1 ms cada, o que ocupa em torno de meio núcleo (ordem de grandeza, a partir do `EXPLAIN`). Os 17 pods abririam cerca de 170 conexões (pool padrão de 10). O limite de conexões do Cloud SQL depende da memória da instância e deve ser conferido na documentação do Cloud SQL para a classe escolhida; passando dele, entra um agrupador de conexões (PgBouncer ou o recurso de pool gerenciado do Cloud SQL, se disponível na edição).
 
-**O que quebraria primeiro a 10x** não é a CPU:
+O que quebraria primeiro a 10x não é a CPU:
 
-1. **O rate limit por IP** (6.000 por minuto, 100 req/s) em memória por instância. Poucos integradores grandes ou um balanceador compartilhando o IP bloqueariam tráfego legítimo. Precisa ir para o API Gateway (quota por cliente) ou para o Redis ([testes.md](testes.md)). O Cloud Armor limita por IP na borda, mas não por cliente.
+1. O rate limit por IP (6.000 por minuto, 100 req/s) em memória por instância. Poucos integradores grandes ou um balanceador compartilhando o IP bloqueariam tráfego legítimo. Precisa ir para o API Gateway (quota por cliente) ou para o Redis ([testes.md](testes.md)). O Cloud Armor limita por IP na borda, mas não por cliente.
 2. **O pool de conexões** do banco, citado acima.
-3. **O custo de saída e de processamento do balanceador**, que cresce com o tráfego ([custos.md](custos.md)).
+3. O custo de saída e de processamento do balanceador, que cresce com o tráfego ([custos.md](custos.md)).
 
 O Keycloak **não** está no caminho crítico de leitura: os serviços validam o JWT localmente com a chave pública em cache, então o tráfego dele é de emissão de token, proporcional ao número de integradores e não ao número de requisições.
 
 ## Escalonamento
 
-- **Horizontal primeiro.** Serviços sem estado, HPA por CPU (60%), com escala para dentro lenta (para não oscilar) e para fora rápida. O Autopilot provisiona os nós; a espera para subir um pod novo (algumas dezenas de segundos por causa dos nós) deve ser medida no primeiro teste e é motivo para manter 2 pods como mínimo.
-- **Vertical só para banco.** Subir a classe do Cloud SQL numa janela de manutenção quando CPU ou conexões saturarem; réplica de leitura para o consolidado se o cache não bastar.
-- **Buffer do broker.** Um pico de escrita acumula no Pub/Sub e no outbox sem afetar a latência de lançamentos; o preço é o atraso de consistência (`consolidado_evento_lag_seconds`), que o RNF-05 limita em cerca de 5 segundos.
+- Horizontal primeiro. Serviços sem estado, HPA por CPU (60%), com escala para dentro lenta (para não oscilar) e para fora rápida. O Autopilot provisiona os nós; a espera para subir um pod novo (algumas dezenas de segundos por causa dos nós) deve ser medida no primeiro teste e é motivo para manter 2 pods como mínimo.
+- Vertical só para banco. Subir a classe do Cloud SQL numa janela de manutenção quando CPU ou conexões saturarem; réplica de leitura para o consolidado se o cache não bastar.
+- Buffer do broker. Um pico de escrita acumula no Pub/Sub e no outbox sem afetar a latência de lançamentos; o preço é o atraso de consistência (`consolidado_evento_lag_seconds`), que o RNF-05 limita em cerca de 5 segundos.
 
 ## Como validar
 

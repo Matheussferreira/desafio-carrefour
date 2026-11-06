@@ -9,8 +9,8 @@
 
 O consumidor do consolidado tentava aplicar o evento até 4 vezes, com 1 s, 2 s e 4 s de espera, e mandava a mensagem para a DLQ (`consolidado.lancamentos.dlq`) se todas falhassem. Isso tratava igual dois problemas muito diferentes:
 
-- **Mensagem que nunca vai passar:** JSON quebrado, campo fora do contrato, versão 2.x. Repetir não ajuda.
-- **Infraestrutura fora do ar:** o banco do consolidado indisponível, uma conexão derrubada, um tempo esgotado. A mensagem é válida; basta esperar.
+- Mensagem que nunca vai passar: JSON quebrado, campo fora do contrato, versão 2.x. Repetir não ajuda.
+- Infraestrutura fora do ar: o banco do consolidado indisponível, uma conexão derrubada, um tempo esgotado. A mensagem é válida; basta esperar.
 
 Com a regra antiga, uma queda do banco de mais de cerca de 7 segundos esvaziava a fila principal para a DLQ, e alguém precisava devolver tudo à mão. Em uma queda de minutos, o resultado era uma DLQ cheia de eventos corretos. Isso contradiz o objetivo do desenho: o consolidado pode atrasar, mas não pode exigir intervenção manual por uma falha que passa sozinha.
 
@@ -38,11 +38,11 @@ Esconde o problema: a DLQ continuaria recebendo eventos válidos a cada queda, e
 
 ## Consequências
 
-**Positivas:**
+Positivas:
 - Uma queda do banco do consolidado, de qualquer duração, termina com o saldo convergindo sozinho e a DLQ intacta. Está provado por teste de integração (banco bloqueado de verdade) e pelo cenário D do teste de resiliência (30 segundos, na stack real).
 - O alerta da DLQ volta a ter significado: qualquer mensagem lá é um problema de dado ou de versão.
 
-**Negativas e limites:**
+Negativas e limites:
 - A mensagem retida ocupa o consumidor. Com `prefetch=1` e uma réplica, nada mais é processado durante a queda, o que é desejado (o banco está fora). Com várias réplicas, cada uma retém uma mensagem.
 - O tempo para voltar ao normal depende da espera: depois que o banco volta, a próxima tentativa pode demorar até 15 s.
 - Um erro classificado como permanente por engano vai para a DLQ depois de 7 s, e um classificado como transitório por engano fica retido para sempre. A lista de códigos é conservadora (só o que o PostgreSQL e o Node documentam como falha de infraestrutura) e coberta por testes unitários.

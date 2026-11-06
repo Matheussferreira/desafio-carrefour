@@ -2,15 +2,15 @@
 
 **Status:** Aceito  
 **Data:** 2026-11-04  
-**Complementa:** ADR-005 (Outbox Pattern). Revisa a alternativa descartada no ADR-001.
+Complementa: ADR-005 (Outbox Pattern). Revisa a alternativa descartada no ADR-001.
 
 ## Contexto
 
 A primeira versão do relay rodava dentro do processo da API de lançamentos, com `setInterval`, e tinha três defeitos:
 
-1. **Sem publisher confirms.** `channel.publish()` devolve `true` quando o buffer local aceita a mensagem, não quando o broker a persistiu. O relay marcava a linha como publicada nesse momento. Uma queda do broker logo depois perdia o evento, o que contradiz o requisito de zero perda.
-2. **Sem exclusão entre réplicas.** O `SELECT` não travava as linhas. Com N réplicas da API, as N publicavam os mesmos eventos.
-3. **Acoplamento de disponibilidade.** A API só ficava pronta com o RabbitMQ conectado, e uma queda de conexão não era recuperada: o relay falhava a cada ciclo até alguém reiniciar o processo.
+1. Sem publisher confirms. `channel.publish()` devolve `true` quando o buffer local aceita a mensagem, não quando o broker a persistiu. O relay marcava a linha como publicada nesse momento. Uma queda do broker logo depois perdia o evento, o que contradiz o requisito de zero perda.
+2. Sem exclusão entre réplicas. O `SELECT` não travava as linhas. Com N réplicas da API, as N publicavam os mesmos eventos.
+3. Acoplamento de disponibilidade. A API só ficava pronta com o RabbitMQ conectado, e uma queda de conexão não era recuperada: o relay falhava a cada ciclo até alguém reiniciar o processo.
 
 ## Decisão
 
@@ -49,13 +49,13 @@ Funciona, mas serializa a publicação em uma réplica e desperdiça as demais. 
 
 ## Consequências
 
-**Positivas:**
+Positivas:
 - Zero perda no trecho banco para broker: sem ack, o evento continua pendente.
 - Várias réplicas do relay dividem o trabalho sem duplicar, comprovado por teste de integração com 3 relays e 200 eventos contra um RabbitMQ real. Há duas garantias distintas, com um teste para cada. (1) **Não duplicar** vem do bloqueio de linha dentro da transação: se a consulta perde o `FOR UPDATE SKIP LOCKED` inteiro e vira um `SELECT` simples, os relays leem as mesmas linhas e publicam duplicado, e o teste dos 3 relays com 200 eventos detecta (em medições repetidas vieram de 520 a 600 mensagens em vez de 200). (2) **Dividir o trabalho** vem do `SKIP LOCKED`: se só ele for removido, mantendo o `FOR UPDATE`, não há duplicação, porque um relay espera o outro terminar e depois vê as linhas já publicadas, mas os relays passam a se serializar. Isso o teste dos 3 relays não detecta; quem detecta é o teste das linhas travadas, que segura linhas numa transação e falha se o relay esperar por elas.
 - A API de lançamentos continua pronta e aceitando escritas com o RabbitMQ fora do ar; os eventos ficam pendentes no outbox.
 - Queda e retorno do broker são recuperados sem reiniciar processos.
 
-**Negativas:**
+Negativas:
 - Mais um processo para operar e monitorar (healthcheck, métricas, deploy).
 - Se o processo cair depois do ack e antes do `COMMIT`, o lote é publicado de novo. A entrega continua at-least-once e o consumidor segue idempotente (`eventos_processados`).
 - A transação do relay fica aberta enquanto espera os acks. Com lote de 50 e broker saudável isso dura milissegundos; com o broker lento, as linhas ficam travadas apenas para outras réplicas, nunca para a API.

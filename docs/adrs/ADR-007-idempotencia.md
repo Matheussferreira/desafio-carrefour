@@ -9,8 +9,8 @@
 
 O sistema opera com duas fronteiras onde o mesmo dado pode chegar mais de uma vez:
 
-1. **Fronteira HTTP:** O cliente que faz `POST /lancamentos` pode reenviar a requisição após um timeout de rede, sem saber se a original foi processada.
-2. **Fronteira AMQP:** O RabbitMQ entrega mensagens com semântica *at-least-once*. O consumer pode receber e processar uma mensagem, mas o processo pode morrer antes de executar o `channel.ack()`, causando reentrega pelo broker.
+1. Fronteira HTTP: O cliente que faz `POST /lancamentos` pode reenviar a requisição após um timeout de rede, sem saber se a original foi processada.
+2. Fronteira AMQP: O RabbitMQ entrega mensagens com semântica *at-least-once*. O consumer pode receber e processar uma mensagem, mas o processo pode morrer antes de executar o `channel.ack()`, causando reentrega pelo broker.
 
 Sem proteção em ambas as fronteiras, o sistema produz saldos incorretos, um crédito de R$ 1.500,00 processado duas vezes geraria R$ 3.000,00 no saldo.
 
@@ -18,10 +18,10 @@ Sem proteção em ambas as fronteiras, o sistema produz saldos incorretos, um cr
 
 ## Decisão
 
-Implementar **idempotência em duas camadas independentes**, cada uma protegendo sua fronteira específica:
+Implementar idempotência em duas camadas independentes, cada uma protegendo sua fronteira específica:
 
-- **Camada 1, HTTP:** `X-Idempotency-Key` header + verificação dentro da transação de banco
-- **Camada 2, Consumer:** tabela `eventos_processados` com `ON CONFLICT DO NOTHING` dentro da mesma transação que atualiza o saldo
+- Camada 1, HTTP: `X-Idempotency-Key` header + verificação dentro da transação de banco
+- Camada 2, Consumer: tabela `eventos_processados` com `ON CONFLICT DO NOTHING` dentro da mesma transação que atualiza o saldo
 
 ---
 
@@ -57,7 +57,7 @@ Quem resolve a corrida entre dois pedidos simultâneos com a mesma chave é a co
 | Duas chamadas simultâneas, mesma chave e mesmo corpo | Uma recebe 201, a outra 200, sem duplicata no banco |
 | Sem header `X-Idempotency-Key` | Sem proteção HTTP; cada request cria um lançamento novo |
 
-**Nota:** A ausência de `X-Idempotency-Key` não é um erro, é explicitamente suportada para clientes que gerem garantias de entrega de outra forma. A chave é opcional por design.
+Nota: A ausência de `X-Idempotency-Key` não é um erro, é explicitamente suportada para clientes que gerem garantias de entrega de outra forma. A chave é opcional por design.
 
 ---
 
@@ -137,13 +137,13 @@ Usar `SET eventoId NX EX 3600` no Redis como lock distribuído antes de processa
 
 ## Consequências
 
-**Positivas:**
+Positivas:
 - Idempotência garantida end-to-end: do request HTTP até o saldo persistido no banco
 - O consumer pode processar a mesma mensagem quantas vezes for entregue pelo broker sem efeito colateral
 - Sem lock explícito: o upsert atômico permite N réplicas do consumer rodando em paralelo
 - `eventos_processados` serve como auditoria de todos os eventos que afetaram o saldo
 
-**Negativas:**
+Negativas:
 - A tabela `eventos_processados` cresce indefinidamente, precisa de política de retenção em produção (particionamento ou archival após N dias)
 - O `X-Idempotency-Key` é optional no endpoint; clientes que não o enviem não têm proteção contra retries na camada HTTP
 - A corrida entre pedidos concorrentes com a mesma chave é resolvida pela constraint única do banco, não por isolamento SERIALIZABLE, o que evita o custo de serializar toda a tabela

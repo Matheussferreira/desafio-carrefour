@@ -24,7 +24,7 @@ Ou o oposto:
 
 ## Decisão
 
-**Outbox Pattern:** gravar o lançamento e o evento na **mesma transação** de banco de dados. Um processo relay lê os eventos pendentes e os publica no broker.
+Outbox Pattern: gravar o lançamento e o evento na **mesma transação** de banco de dados. Um processo relay lê os eventos pendentes e os publica no broker.
 
 ```
 Transação ACID:
@@ -56,12 +56,12 @@ Capturar as mudanças no WAL do Postgres e publicar automaticamente.
 
 ## Consequências
 
-**Positivas:**
+Positivas:
 - Garantia **at-least-once**: o evento sempre chega ao broker, mesmo após falhas do broker
 - O relay pode retentar indefinidamente sem perder eventos
 - A tabela `outbox` serve como auditoria de todos os eventos publicados
 
-**Negativas:**
+Negativas:
 - Latência adicional: o evento chega ao broker com delay de até `OUTBOX_INTERVAL_MS` (padrão 1s)
 - O relay precisa rodar continuamente; roda como processo próprio (ver ADR-008)
 - Possibilidade de duplicatas: se o relay publicar e cair antes de marcar como publicado, o evento será publicado de novo na próxima execução, e por isso o consumidor deve ser idempotente (e é, via `eventos_processados`)

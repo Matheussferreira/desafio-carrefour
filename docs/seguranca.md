@@ -4,7 +4,7 @@ Este documento cobre o modelo de segurança do **consumo** das APIs (quem pode c
 
 ## Modelo de consumo
 
-Cada sistema que integra (ERP, BI, contabilidade) é um **cliente OAuth2 confidencial** no Keycloak, usando o fluxo *client credentials* (RFC 6749, seção 4.4). Não há usuário humano nem senha no caminho.
+Cada sistema que integra (ERP, BI, contabilidade) é um cliente OAuth2 confidencial no Keycloak, usando o fluxo *client credentials* (RFC 6749, seção 4.4). Não há usuário humano nem senha no caminho.
 
 ```mermaid
 sequenceDiagram
@@ -69,7 +69,7 @@ Definidos em [keycloak/realm-caixa.json](../keycloak/realm-caixa.json). Os segre
 | Situação | Comportamento | Evidência |
 |---|---|---|
 | Keycloak fora do ar, serviço já tem as chaves | Tokens válidos continuam sendo aceitos (as chaves ficam em cache por 10 min e a revalidação só ocorre ao girar a chave) | Teste unitário e verificação manual: com o Keycloak parado, POST e GET responderam 201 e 200 |
-| Keycloak fora do ar, serviço acabou de subir e nunca viu as chaves | **503** com `Retry-After: 5`, e não 401, porque a falha é do provedor, não do token | Teste unitário e verificação manual |
+| Keycloak fora do ar, serviço acabou de subir e nunca viu as chaves | 503 com `Retry-After: 5`, e não 401, porque a falha é do provedor, não do token | Teste unitário e verificação manual |
 | Rotação de chaves no Keycloak | Um `kid` desconhecido dispara nova busca do JWKS (com intervalo mínimo de 15 s entre buscas) | Verificado ao recriar o Keycloak: as chaves mudaram e os serviços aceitaram os tokens novos sem reinício |
 | Keycloak fora do ar, cliente quer token novo | Não consegue até o Keycloak voltar. O token dura 300 s, então a janela de tolerância do consumidor é de até 5 minutos | Verificação manual |
 
@@ -106,13 +106,13 @@ O `X-Idempotency-Key` é uma string opaca de 1 a 255 caracteres, **escopada por 
 ### Segredos
 
 - Configuração por variáveis de ambiente; `.env` fora do Git e `.env.example` com valores só para desenvolvimento.
-- Os serviços **não guardam segredo de assinatura**: validam com a chave pública do JWKS. Não existe mais `JWT_SECRET`.
+- Os serviços não guardam segredo de assinatura: validam com a chave pública do JWKS. Não existe mais `JWT_SECRET`.
 - Os segredos dos clientes no `realm-caixa.json` são de desenvolvimento. Em produção ficam no Secret Manager, lidos por Workload Identity, e são rotacionados.
 
 ### Cabeçalhos e tamanho de corpo
 
 - O `helmet` está ativo nos dois serviços (`src/app.ts`): `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`, `Content-Security-Policy` restritiva e outros. O `X-Powered-By` é desligado para não anunciar o framework.
-- O corpo JSON é limitado a **16 kB** (`express.json({ limit: '16kb' })`). Um lançamento tem poucas centenas de bytes; o campo `descricao` aceita no máximo 500 caracteres. Acima do limite a resposta é **413** `problem+json`. O limite é aplicado antes da autenticação, então um chamador sem credencial também não consegue fazer o serviço processar um corpo grande.
+- O corpo JSON é limitado a 16 kB (`express.json({ limit: '16kb' })`). Um lançamento tem poucas centenas de bytes; o campo `descricao` aceita no máximo 500 caracteres. Acima do limite a resposta é 413 `problem+json`. O limite é aplicado antes da autenticação, então um chamador sem credencial também não consegue fazer o serviço processar um corpo grande.
 - Testes: `tests/unit/protecao-http.test.ts` nos dois serviços.
 
 ## Modelo de ameaças (STRIDE resumido)
@@ -159,7 +159,7 @@ Nada desta seção está implementado no ambiente local. São a arquitetura alvo
 | Tema | Proposta | Observações |
 |---|---|---|
 | **mTLS entre serviços** | Malha de serviço (por exemplo Cloud Service Mesh ou Istio) ou certificados emitidos pelo Certificate Authority Service, com rotação automática, entre o balanceador, os serviços, o Keycloak, o Redis e o broker | Impede que um processo qualquer na VPC converse com as APIs. Para integradores externos sensíveis, autenticação do cliente por certificado (RFC 8705) como complemento ao token |
-| **Borda: Cloud Armor e API Gateway (ou Apigee)** | Cloud Armor no balanceador, com as regras OWASP pré-configuradas e limite de taxa por IP. Quota por cliente (claim `azp` do token) no API Gateway, ou no Apigee se houver muitos integradores externos que precisem de portal e análise | O Cloud Armor não enxerga o claim do token, então a quota por cliente é do gateway. Resolve a limitação do rate limit por IP atrás de balanceador e cobre a detecção de abuso de fluxo (API6) |
+| Borda: Cloud Armor e API Gateway (ou Apigee) | Cloud Armor no balanceador, com as regras OWASP pré-configuradas e limite de taxa por IP. Quota por cliente (claim `azp` do token) no API Gateway, ou no Apigee se houver muitos integradores externos que precisem de portal e análise | O Cloud Armor não enxerga o claim do token, então a quota por cliente é do gateway. Resolve a limitação do rate limit por IP atrás de balanceador e cobre a detecção de abuso de fluxo (API6) |
 | **Segredos** | Secret Manager para senhas do banco e segredos de cliente OAuth2, com rotação; leitura por Workload Identity da conta de serviço de cada pod, nunca por variável gravada em imagem ou repositório. Sem chaves de conta de serviço baixadas | Os segredos do `realm-caixa.json` são descartados. Evolução para `private_key_jwt` elimina o segredo compartilhado |
 | **Criptografia em trânsito** | TLS 1.2 ou superior em toda conexão: cliente até o balanceador, `sslmode=verify-full` no PostgreSQL (Cloud SQL), TLS no Memorystore e no Keycloak. O Pub/Sub é acessado por TLS | HSTS já é enviado pelo helmet |
 | **Criptografia em repouso** | Cloud KMS com chave gerenciada pelo cliente (CMEK) para o Cloud SQL, o Pub/Sub, o Memorystore, o Secret Manager e os buckets de backup e de auditoria. Rotação automática da chave | Política de chave separando quem administra de quem usa. Proteger contra a destruição acidental de versões de chave |

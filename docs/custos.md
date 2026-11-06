@@ -1,12 +1,12 @@
 # Estimativa de custos de infraestrutura e licenças
 
-Todos os valores são **estimativas**, em dólares americanos, para o Google Cloud na região `southamerica-east1` (São Paulo), consultadas em **2026-11-05**. Nada aqui foi cobrado nem medido numa conta real. Os preços unitários dos três itens que mais pesam (Cloud SQL, GKE Autopilot e Memorystore) são **oficiais de São Paulo**; o que ainda não tem confirmação aparece como faixa, e o conjunto precisa ser conferido na calculadora antes de qualquer compromisso de orçamento.
+Todos os valores são **estimativas**, em dólares americanos, para o Google Cloud na região `southamerica-east1` (São Paulo), consultadas em 2026-11-05. Nada aqui foi cobrado nem medido numa conta real. Os preços unitários dos três itens que mais pesam (Cloud SQL, GKE Autopilot e Memorystore) são **oficiais de São Paulo**; o que ainda não tem confirmação aparece como faixa, e o conjunto precisa ser conferido na calculadora antes de qualquer compromisso de orçamento.
 
 ## Fonte e como validar
 
-A calculadora oficial é o [Google Cloud Pricing Calculator](https://cloud.google.com/products/calculator). Escolha a região `southamerica-east1` e refaça as tabelas abaixo; anote a data da validação ao lado do resultado. **Validação na calculadora: não realizada.**
+A calculadora oficial é o [Google Cloud Pricing Calculator](https://cloud.google.com/products/calculator). Escolha a região `southamerica-east1` e refaça as tabelas abaixo; anote a data da validação ao lado do resultado. Validação na calculadora: não realizada.
 
-Como foi a consulta: os preços de Cloud SQL, GKE Autopilot e Memorystore foram lidos nas **páginas de preço oficiais com a região `southamerica-east1` selecionada na tabela**, em 2026-11-05, sob demanda, 730 horas por mês. Os itens globais (Pub/Sub, Secret Manager, Cloud KMS, Cloud Armor, Cloud Logging, Prometheus gerenciado, Cloud Trace e balanceador) vêm do texto das páginas oficiais. Cada linha das tabelas leva uma classificação:
+Como foi a consulta: os preços de Cloud SQL, GKE Autopilot e Memorystore foram lidos nas páginas de preço oficiais com a região `southamerica-east1` selecionada na tabela, em 2026-11-05, sob demanda, 730 horas por mês. Os itens globais (Pub/Sub, Secret Manager, Cloud KMS, Cloud Armor, Cloud Logging, Prometheus gerenciado, Cloud Trace e balanceador) vêm do texto das páginas oficiais. Cada linha das tabelas leva uma classificação:
 
 | Classe | Significado | Como entra na tabela |
 |---|---|---|
@@ -40,16 +40,16 @@ A alta disponibilidade regional do Cloud SQL **dobra** o custo de vCPU, de memó
 - 730 horas por mês, preço sob demanda, sem desconto por uso comprometido (ver a seção de otimizações).
 - Dois bancos PostgreSQL em instâncias Cloud SQL separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md).
 - Quatro componentes de aplicação em GKE Autopilot: `lancamentos`, `lancamentos-relay`, `consolidado` (com o consumidor) e o Keycloak. O tamanho de cada pod é uma **hipótese**; a capacidade medida do consolidado (cerca de 197 a 199 req/s numa instância, em máquina de desenvolvimento, [testes.md](testes.md)) não foi medida no GKE.
-- **Um único cluster GKE na conta de faturamento**, o que zera a taxa de gerenciamento pelo crédito (ver abaixo).
+- Um único cluster GKE na conta de faturamento, o que zera a taxa de gerenciamento pelo crédito (ver abaixo).
 - Broker: Pub/Sub ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)), cerca de 3 milhões de mensagens por mês de menos de 1 KB.
 - Cloud NAT fora da conta: nenhum componente precisa de saída para a internet ([arquitetura-alvo-cloud.md](arquitetura-alvo-cloud.md)).
 - Moeda: dólar. Não incluo impostos, suporte do Google, câmbio nem horas de operação da equipe.
 
 ## Taxa de gerenciamento do cluster GKE
 
-A taxa é de US$ 0,10 por hora por cluster, ou **US$ 73,00 por mês** (0,10 x 730). O crédito gratuito de **US$ 74,40 por mês por conta de faturamento** cobre um cluster Autopilot ou zonal, e por isso a taxa entra como **zero** nos cenários abaixo.
+A taxa é de US$ 0,10 por hora por cluster, ou US$ 73,00 por mês (0,10 x 730). O crédito gratuito de US$ 74,40 por mês por conta de faturamento cobre um cluster Autopilot ou zonal, e por isso a taxa entra como **zero** nos cenários abaixo.
 
-**Esse zero só vale enquanto houver um único cluster na conta de faturamento.** Cada cluster adicional soma US$ 73,00 por mês, e o mesmo vale para um cluster regional do modo Standard, que não é coberto pelo crédito. Consequências práticas:
+Esse zero só vale enquanto houver um único cluster na conta de faturamento. Cada cluster adicional soma US$ 73,00 por mês, e o mesmo vale para um cluster regional do modo Standard, que não é coberto pelo crédito. Consequências práticas:
 
 | Situação | Taxa de cluster |
 |---|---|
@@ -62,7 +62,7 @@ O crédito que sobra (US$ 1,40) não acumula. Se a empresa já tem outro cluster
 
 ## Licenças
 
-**Zero.** PostgreSQL, Redis, RabbitMQ, Node.js, Keycloak, Prometheus, Grafana, Jaeger e k6 são software livre. No Cloud SQL e no Memorystore a licença do motor está embutida no preço do serviço. O Cloud SQL tem as edições Enterprise e Enterprise Plus, com preços diferentes; esta estimativa usa a Enterprise. A única licença paga a considerar seria a de ferramentas comerciais de observabilidade ou de WAF de terceiros, que esta solução não usa.
+Zero. PostgreSQL, Redis, RabbitMQ, Node.js, Keycloak, Prometheus, Grafana, Jaeger e k6 são software livre. No Cloud SQL e no Memorystore a licença do motor está embutida no preço do serviço. O Cloud SQL tem as edições Enterprise e Enterprise Plus, com preços diferentes; esta estimativa usa a Enterprise. A única licença paga a considerar seria a de ferramentas comerciais de observabilidade ou de WAF de terceiros, que esta solução não usa.
 
 ## Cenário A: mínimo viável (um ambiente enxuto, sem alta disponibilidade)
 
@@ -85,10 +85,10 @@ O crédito que sobra (US$ 1,40) não acumula. Se a empresa já tem outro cluster
 | Secret Manager, 5 versões ativas | O | 0,00 | abaixo das 6 gratuitas |
 | Cloud Logging, 10 GiB | O | 0,00 | abaixo dos 50 GiB gratuitos |
 | Artifact Registry, 1 GB | H | 0,05 a 0,25 | hipótese |
-| **Total estimado** | | **cerca de 418 a 424** (ponto médio 421) | soma dos itens: 411,69 de valores únicos mais 6,45 a 12,35 das faixas |
+| **Total estimado** | | cerca de 418 a 424 (ponto médio 421) | soma dos itens: 411,69 de valores únicos mais 6,45 a 12,35 das faixas |
 
 Observações do cenário A:
-- Os três produtos de preço regional (GKE, Cloud SQL e Memorystore) somam **352,57** e entram com valor único. A faixa que sobra, de menos de US$ 6, vem só do balanceador (dados processados), da saída para a internet e do Artifact Registry.
+- Os três produtos de preço regional (GKE, Cloud SQL e Memorystore) somam 352,57 e entram com valor único. A faixa que sobra, de menos de US$ 6, vem só do balanceador (dados processados), da saída para a internet e do Artifact Registry.
 - O Redis do nível Basic não tem réplica nem failover.
 - O Pub/Sub custa zero porque cerca de 3 milhões de mensagens por mês de menos de 1 KB ficam em alguns GiB (publicação e entrega), abaixo da franquia gratuita de 10 GiB por mês por conta de faturamento. A franquia é compartilhada com outros projetos da mesma conta.
 - Com um segundo cluster na mesma conta, some 73,00 (ver a seção da taxa de cluster).
@@ -117,11 +117,11 @@ Três zonas na região, dois ou mais pods por serviço, bancos com HA regional, 
 | Pub/Sub, cerca de 6 GiB de vazão | O | 0,00 | dentro da franquia; a 10 vezes o volume seria cerca de 1,95 |
 | Cloud Storage, logs de auditoria com retenção bloqueada, 100 GB | H | 2,00 a 5,00 | 100 GB x 0,02 a 0,05 |
 | Artifact Registry, 2 GB | H | 0,10 a 0,35 | hipótese |
-| **Total estimado** | | **cerca de 1.165 a 1.181** (ponto médio 1.173) | soma dos itens: 1.149,78 de valores únicos mais 15,70 a 30,75 das faixas |
+| Total estimado | | cerca de 1.165 a 1.181 (ponto médio 1.173) | soma dos itens: 1.149,78 de valores únicos mais 15,70 a 30,75 das faixas |
 
 Observações do cenário B:
-- O **Cloud SQL domina o custo** (cerca de 56% do total: 654,74 de cerca de 1.170). É a consequência de ter dois bancos com HA regional, como pede o ADR-004. O GKE vem em seguida (cerca de 24%) e o Memorystore Standard em terceiro (cerca de 9%). O broker, que na alternativa com RabbitMQ no GKE custaria algumas centenas de dólares, aqui é praticamente zero.
-- Os três produtos de preço regional somam **1.044,92** e entram com valor único. A faixa que sobra, de cerca de US$ 15 de largura, vem do balanceador, da saída para a internet, do Cloud Storage e do Artifact Registry, todos de peso pequeno.
+- O Cloud SQL domina o custo (cerca de 56% do total: 654,74 de cerca de 1.170). É a consequência de ter dois bancos com HA regional, como pede o ADR-004. O GKE vem em seguida (cerca de 24%) e o Memorystore Standard em terceiro (cerca de 9%). O broker, que na alternativa com RabbitMQ no GKE custaria algumas centenas de dólares, aqui é praticamente zero.
+- Os três produtos de preço regional somam 1.044,92 e entram com valor único. A faixa que sobra, de cerca de US$ 15 de largura, vem do balanceador, da saída para a internet, do Cloud Storage e do Artifact Registry, todos de peso pequeno.
 - Os 18 spans por trace foram medidos num `POST /lancamentos` que atravessa API, relay e consolidado (ver [observabilidade.md](observabilidade.md)). A amostragem de 5% é premissa.
 - As 1.000 e 1.500 séries do Prometheus são **hipóteses de volume**; o número real depende dos rótulos das métricas. O preço por amostra é oficial.
 - O Cloud Armor com regras gerenciadas (WAF pré-configurado) cobra por requisição avaliada, o que dobra a parcela por requisição.
@@ -154,15 +154,15 @@ O RabbitMQ em três pods de 1 vCPU e 2 GiB, no preço confirmado do Autopilot em
 |---|---|---|
 | vCPU, 3 x 1 | 3 x 0,0707 x 730 | 154,83 |
 | Memória, 3 x 2 GiB | 6 x 0,0078164 x 730 | 34,24 |
-| **Pods** | | **189,07** |
+| **Pods** | | 189,07 |
 | Discos SSD, 3 x 50 GB (hipótese H) | 150 GB x 0,17 a 0,35 | 25,50 a 52,50 |
-| **Total** | | **214,57 a 241,57** |
+| **Total** | | 214,57 a 241,57 |
 
 A taxa de cluster não entra, porque os pods rodam no mesmo cluster da aplicação.
 
 | | Pub/Sub | RabbitMQ em 3 pods no GKE Autopilot |
 |---|---|---|
-| Custo mensal estimado | cerca de 0 neste volume (10 vezes o volume: cerca de 1,95) | **214,57 a 241,57** (pods 189,07 mais discos) |
+| Custo mensal estimado | cerca de 0 neste volume (10 vezes o volume: cerca de 1,95) | 214,57 a 241,57 (pods 189,07 mais discos) |
 | Quem opera | O Google | A equipe: atualização, filas de quórum, volumes, partição de rede, disco cheio, backup |
 | Código | Exige o adaptador do [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md) | O código de hoje funciona sem mudança |
 | Risco | Baixo de operação; médio de semântica (tópico sem assinatura descarta; contagem de tentativas na DLQ) | Médio a alto de operação |
@@ -174,7 +174,7 @@ A diferença de custo é de cerca de 215 a 242 dólares por mês, e a decisão p
 | | Keycloak no GKE (2 pods de 1 vCPU e 2 GiB) | Identity Platform |
 |---|---|---|
 | Custo mensal estimado | 126,05 de pods (2 x 0,0707 + 4 x 0,0078164, x 730), mais o banco (um terceiro banco na instância de lançamentos) | Cobrança por usuário ativo mensal (preço não confirmado) |
-| Serve a *client credentials* | **Sim.** É o que o código usa | **Não é o caso de uso.** O produto é voltado à autenticação de usuários finais; não confirmei suporte ao fluxo de máquina a máquina e, se não houver, ele não substitui o Keycloak aqui |
+| Serve a *client credentials* | Sim. É o que o código usa | Não é o caso de uso. O produto é voltado à autenticação de usuários finais; não confirmei suporte ao fluxo de máquina a máquina e, se não houver, ele não substitui o Keycloak aqui |
 | Quem opera | A equipe: atualização, realm, HA, TLS | O Google |
 
 Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tokens de identidade (OIDC) emitidos para contas de serviço, que dispensam o Keycloak, mas não carregam o claim `comerciante_id` nem os escopos; esse vínculo teria de ficar em configuração dos serviços. Isso muda a validação do JWT ([ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md)) e não serve a integradores externos. Por isso a proposta mantém o Keycloak. Confirme na documentação do Identity Platform antes de decidir diferente.
@@ -183,7 +183,7 @@ Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tok
 
 | Otimização | Efeito | Cálculo |
 |---|---|---|
-| Pods Spot (ver a seção abaixo) | Só o relay é elegível, com ao menos uma réplica sob demanda. Cenário B: **economia de US$ 11,03** (31,51 para 20,48). Cenário A: **economia zero** com um pod só; a segunda réplica em Spot custaria US$ 4,72 contra US$ 15,76 sob demanda | Cálculos na seção "Pods Spot". Preços Spot oficiais de São Paulo (classe O) |
+| Pods Spot (ver a seção abaixo) | Só o relay é elegível, com ao menos uma réplica sob demanda. Cenário B: economia de US$ 11,03 (31,51 para 20,48). Cenário A: **economia zero** com um pod só; a segunda réplica em Spot custaria US$ 4,72 contra US$ 15,76 sob demanda | Cálculos na seção "Pods Spot". Preços Spot oficiais de São Paulo (classe O) |
 | Pub/Sub no lugar de RabbitMQ no GKE | economia de cerca de US$ 215 a 242 por mês | ver a comparação acima; troca custo de operação por trabalho de adaptador |
 | Sem Cloud NAT | evita a taxa por IP e por GiB | nenhum componente precisa de saída para a internet |
 | Um cluster por conta de faturamento | evita US$ 73,00 por mês por cluster adicional | o crédito de US$ 74,40 cobre só um cluster; agrupar ambientes em namespaces do mesmo cluster tem custo de isolamento a avaliar |
@@ -196,33 +196,33 @@ Preço oficial de São Paulo, lido na mesma página e data dos demais: vCPU US$ 
 | Caso (relay com pods de 0,25 vCPU e 0,5 GiB, hipótese) | Sob demanda | Com Spot | Economia | Cálculo |
 |---|---|---|---|---|
 | Um pod de relay | 15,76 | 4,72 | 11,03 por pod | OD: (0,25 x 0,0707 + 0,5 x 0,0078164) x 730; Spot: (0,25 x 0,0212 + 0,5 x 0,0023449) x 730 |
-| **Cenário B**: 2 réplicas, uma sob demanda e uma Spot | 31,51 (as duas sob demanda) | **20,48** | **11,03** | 15,76 + 4,72 |
-| **Cenário A**: 1 réplica, sob demanda | 15,76 | 15,76 | **0,00** | Com um pod só não há réplica a mover para Spot sem violar a regra de manter uma sob demanda |
+| **Cenário B**: 2 réplicas, uma sob demanda e uma Spot | 31,51 (as duas sob demanda) | 20,48 | 11,03 | 15,76 + 4,72 |
+| **Cenário A**: 1 réplica, sob demanda | 15,76 | 15,76 | 0,00 | Com um pod só não há réplica a mover para Spot sem violar a regra de manter uma sob demanda |
 | Cenário A com uma segunda réplica Spot | 31,51 (segunda sob demanda) | 20,48 | 11,03 contra uma segunda réplica sob demanda | Acrescenta US$ 4,72, e não US$ 15,76, para ter redundância do relay |
 
-**Spot só serve ao que tolera interrupção.** O Google pode retomar um pod Spot a qualquer momento, com aviso curto. Para esta solução:
+Spot só serve ao que tolera interrupção. O Google pode retomar um pod Spot a qualquer momento, com aviso curto. Para esta solução:
 
 | Componente | Spot? | Por quê |
 |---|---|---|
-| Consumidor | **Não, hoje; sim se for separado** | Idempotente ([ADR-007](adrs/ADR-007-idempotencia.md)), então a mensagem em processamento volta e é reaplicada sem duplicar, e tolera interrupção. Mas hoje ele roda **dentro do pod do consolidado**, junto com a API de leitura, e esse pod fica sob demanda. O consumidor só seria elegível se fosse separado num Deployment próprio, o que não existe no código (item em [evolucoes.md](evolucoes.md)) |
-| Relay | **Sim, com ressalva** | Retomar o relay só atrasa a publicação, e `FOR UPDATE SKIP LOCKED` com duas réplicas evita a duplicação ([ADR-008](adrs/ADR-008-relay-processo-separado.md)). A ressalva é o atraso de consistência (`consolidado_evento_lag_seconds`, que o RNF-05 limita em cerca de 5 s) durante a troca de pod, e por isso **ao menos uma réplica fica sob demanda**: se todas fossem Spot e fossem retomadas juntas, o outbox acumularia até um pod novo subir (dezenas de segundos, a medir). O encerramento gracioso existe (RNF-10), mas o prazo de aviso do Spot não foi confirmado e pode ser menor que o do desligamento normal |
+| Consumidor | Não, hoje; sim se for separado | Idempotente ([ADR-007](adrs/ADR-007-idempotencia.md)), então a mensagem em processamento volta e é reaplicada sem duplicar, e tolera interrupção. Mas hoje ele roda dentro do pod do consolidado, junto com a API de leitura, e esse pod fica sob demanda. O consumidor só seria elegível se fosse separado num Deployment próprio, o que não existe no código (item em [evolucoes.md](evolucoes.md)) |
+| Relay | **Sim, com ressalva** | Retomar o relay só atrasa a publicação, e `FOR UPDATE SKIP LOCKED` com duas réplicas evita a duplicação ([ADR-008](adrs/ADR-008-relay-processo-separado.md)). A ressalva é o atraso de consistência (`consolidado_evento_lag_seconds`, que o RNF-05 limita em cerca de 5 s) durante a troca de pod, e por isso ao menos uma réplica fica sob demanda: se todas fossem Spot e fossem retomadas juntas, o outbox acumularia até um pod novo subir (dezenas de segundos, a medir). O encerramento gracioso existe (RNF-10), mas o prazo de aviso do Spot não foi confirmado e pode ser menor que o do desligamento normal |
 | API de lançamentos | **Não** | Está no caminho de escrita e a disponibilidade do lançamentos é requisito (RNF-01) |
-| API do consolidado | **Não** | Está no caminho de leitura do requisito de 50 req/s |
-| Keycloak | **Não** | A emissão de token para integradores depende dele, e o modo de produção tem estado e sessão |
+| API do consolidado | Não | Está no caminho de leitura do requisito de 50 req/s |
+| Keycloak | Não | A emissão de token para integradores depende dele, e o modo de produção tem estado e sessão |
 
-A regra é a mesma nos dois cenários: **só o relay é elegível, e ao menos uma réplica fica sob demanda**; API de lançamentos, consolidado (que hoje inclui o consumidor) e Keycloak ficam sob demanda. O tamanho do pod do relay no cenário A é hipótese (o mesmo do B). Nenhum número de Spot deste documento foi medido; o risco de interrupção não tem preço na tabela e precisa ser observado em operação. Para um ambiente de homologação, que aceita parada, Spot em todos os pods seria possível, mas esse caso não entra em nenhum dos cenários deste documento e não foi calculado.
+A regra é a mesma nos dois cenários: só o relay é elegível, e ao menos uma réplica fica sob demanda; API de lançamentos, consolidado (que hoje inclui o consumidor) e Keycloak ficam sob demanda. O tamanho do pod do relay no cenário A é hipótese (o mesmo do B). Nenhum número de Spot deste documento foi medido; o risco de interrupção não tem preço na tabela e precisa ser observado em operação. Para um ambiente de homologação, que aceita parada, Spot em todos os pods seria possível, mas esse caso não entra em nenhum dos cenários deste documento e não foi calculado.
 
 Práticas de governança de custo (aproveitadas de um estudo anterior do mesmo autor, sem os números dele):
 - **Rótulos obrigatórios** em todos os recursos: `env`, `owner`, `cost-center`, `app`, `team`, para atribuir custo por ambiente e por equipe.
 - **Orçamento e alertas** no Cloud Billing por ambiente.
 - **Recommender** para revisão trimestral de dimensionamento.
-- **Desligar ambientes de não produção** fora do horário comercial.
+- Desligar ambientes de não produção fora do horário comercial.
 - **Custo por transação** como indicador: custo mensal dividido pelos lançamentos do mês.
 
 ## O que este documento não afirma
 
 - Não há custo medido numa conta do Google Cloud. Os totais são aritmética sobre preços de tabela e premissas de volume.
-- Os preços unitários de Cloud SQL, GKE Autopilot e Memorystore são os oficiais de São Paulo lidos em 2026-11-05, mas a **validação na calculadora não foi feita**, e preços mudam.
+- Os preços unitários de Cloud SQL, GKE Autopilot e Memorystore são os oficiais de São Paulo lidos em 2026-11-05, mas a validação na calculadora não foi feita, e preços mudam.
 - O tamanho dos pods e dos bancos é hipótese a validar com teste de carga no próprio Google Cloud.
 - A taxa de cluster zerada depende de haver um único cluster na conta de faturamento.
 - Ainda são hipóteses (classe H): armazenamento e saída para a internet, Artifact Registry, Cloud Storage de auditoria e o volume de séries do Prometheus.

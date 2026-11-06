@@ -32,7 +32,7 @@ graph TD
 | Requisito | Como | Evidência |
 |---|---|---|
 | **Lançamentos não pode ficar indisponível se o Consolidado cair** | Processos, bancos e filas separados; comunicação só assíncrona (Outbox + RabbitMQ). A API de lançamentos depende apenas do próprio banco | Resiliência: 30 de 30 lançamentos aceitos (201) com o consolidado parado, com o RabbitMQ parado e com o banco do consolidado fora por 30 s; o saldo converge na volta ([saída](docs/evidencias/resiliencia-ps1-20261105-193611.txt), [análise](docs/testes.md)) |
-| **Consolidado recebe 50 req/s com no máximo 5% de perda** | Cache Redis com fallback no PostgreSQL; instância sem estado, que escala horizontalmente | k6 a 50 req/s: 0,00% de respostas diferentes de 200 e p95 de 75,3 ms (cache quente) e 37,3 ms (cache frio); a instância respondeu cerca de 197 a 199 req/s no pico, folga de pelo menos 3,9 vezes ([saída](docs/evidencias/k6-consolidado-saida-fase6-pre.txt), [resumo](docs/evidencias/k6-consolidado-resumo.json), [capacidade e ressalvas](docs/testes.md)) |
+| **Consolidado recebe 50 req/s com no máximo 5% de perda** | Cache Redis com fallback no PostgreSQL; instância sem estado, que escala horizontalmente | k6 a 50 req/s: 0,00% de respostas diferentes de 200 e p95 de 75,3 ms (cache quente) e 37,3 ms (cache frio); a instância respondeu cerca de 197 a 199 req/s no pico, folga de pelo menos 3,9 vezes ([saída](docs/evidencias/k6-consolidado-saida-apos-dlq-ready-paginacao.txt), [resumo](docs/evidencias/k6-consolidado-resumo.json), [capacidade e ressalvas](docs/testes.md)) |
 | **Consistência eventual em segundos** | Relay a cada 1 s sem pausa com lote cheio; cache versionado por comerciante e por época | Saldo convergiu em até 4,2 s depois da volta do componente parado (resiliência, três execuções); métrica `consolidado_evento_lag_seconds` |
 | **Nenhum lançamento perdido** | Outbox transacional, `ConfirmChannel` com `mandatory`, `FOR UPDATE SKIP LOCKED`, consumidor idempotente | Testes de integração do relay e do consumidor; [ADR-005](docs/adrs/ADR-005-outbox-pattern.md) |
 
@@ -188,6 +188,7 @@ O tracing vem desligado por padrão porque acrescenta CPU por requisição ([doc
 | Segurança | OAuth2 client credentials, JWT RS256, escopos | [ADR-010](docs/adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md) |
 | Falhas | Falha transitória não vai para a DLQ | [ADR-011](docs/adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md) |
 | Nuvem alvo | Google Cloud (GKE Autopilot, Cloud SQL, Memorystore) com Pub/Sub como broker de produção | [ADR-012](docs/adrs/ADR-012-broker-em-producao-no-gcp.md) |
+| Stack | TypeScript e Node.js 20, Express, PostgreSQL, Docker Compose | [ADR-013](docs/adrs/ADR-013-stack-tecnologica.md) |
 
 Outras escolhas: valores monetários como string na API e `NUMERIC(15,2)` com `decimal.js`; datas de competência como `YYYY-MM-DD`, sem fuso; erros em `application/problem+json`; paginação por cursor.
 

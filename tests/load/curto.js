@@ -3,7 +3,7 @@
  * Serve para comparar versões do código ou configurações da mesma stack.
  *
  * AUTH=keycloak (padrão): token por client credentials no Keycloak.
- * AUTH=login: token pelo /auth/login de desenvolvimento, que só existe nos commits anteriores à fase 3.
+ * AUTH=login: token pelo /auth/login de desenvolvimento, que só existe nos commits anteriores à autenticação por Keycloak (até 98f9fb2).
  *
  * Uso: docker compose --profile loadtest run --rm k6 run /scripts/curto.js
  */

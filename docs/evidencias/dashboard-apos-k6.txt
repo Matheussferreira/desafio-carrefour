@@ -1,16 +1,16 @@
 Painéis do Grafana alimentados logo após o k6 (consultas do dashboard executadas no Prometheus)
 Gerado em 2026-11-05 11:43:09, após a execução 2 do k6 (tests/load/consolidado.js).
 
-Dashboard: Fluxo de Caixa — Overview  |  janela: últimos 10 min  |  http://localhost:9090
+Dashboard: Fluxo de Caixa: Overview  |  janela: últimos 10 min  |  http://localhost:9090
 
-COM DADO  painel  1  séries  4  maior valor      1.556  Taxa de Requisições — Lançamentos (req/s)
-COM DADO  painel  2  séries  1  maior valor     0.0775  Latência HTTP — Lançamentos (p50 / p95)
-COM DADO  painel  2  séries  1  maior valor    0.01423  Latência HTTP — Lançamentos (p50 / p95)
+COM DADO  painel  1  séries  4  maior valor      1.556  Taxa de Requisições: Lançamentos (req/s)
+COM DADO  painel  2  séries  1  maior valor     0.0775  Latência HTTP: Lançamentos (p50 / p95)
+COM DADO  painel  2  séries  1  maior valor    0.01423  Latência HTTP: Lançamentos (p50 / p95)
 COM DADO  painel  3  séries  2  maior valor      72.22  Lançamentos criados (últimos 5min)
 COM DADO  painel  4  séries  2  maior valor      80.55  Eventos Outbox publicados (últimos 5min)
 COM DADO  painel  5  séries  1  maior valor      1.257  Taxa de Eventos Processados (ev/s)
-COM DADO  painel  6  séries  1  maior valor      2.014  Latência HTTP — Consolidado (p50 / p95)
-COM DADO  painel  6  séries  1  maior valor     0.3343  Latência HTTP — Consolidado (p50 / p95)
+COM DADO  painel  6  séries  1  maior valor      2.014  Latência HTTP: Consolidado (p50 / p95)
+COM DADO  painel  6  séries  1  maior valor     0.3343  Latência HTTP: Consolidado (p50 / p95)
 COM DADO  painel  7  séries  1  maior valor          0  Retries do Consumer (últimos 5min)
 COM DADO  painel  8  séries  1  maior valor          0  Mensagens na DLQ (últimos 5min)
 COM DADO  painel  9  séries  2  maior valor   41280000  Heap Node.js (ambos os serviços)
@@ -32,14 +32,14 @@ Nela a segunda consulta do painel 17 (respostas 401, 403, 413 e 429 do consolida
 porque o pico acima da cota gerou 429; na execução 2 acima não houve 429.
 ----------------------------------------------------------------------------------------------
 
-COM DADO  painel  1  séries  2  maior valor      1.556  Taxa de Requisições — Lançamentos (req/s)
-COM DADO  painel  2  séries  1  maior valor     0.0977  Latência HTTP — Lançamentos (p50 / p95)
-COM DADO  painel  2  séries  1  maior valor    0.05991  Latência HTTP — Lançamentos (p50 / p95)
+COM DADO  painel  1  séries  2  maior valor      1.556  Taxa de Requisições: Lançamentos (req/s)
+COM DADO  painel  2  séries  1  maior valor     0.0977  Latência HTTP: Lançamentos (p50 / p95)
+COM DADO  painel  2  séries  1  maior valor    0.05991  Latência HTTP: Lançamentos (p50 / p95)
 COM DADO  painel  3  séries  2  maior valor      194.8  Lançamentos criados (últimos 5min)
 COM DADO  painel  4  séries  2  maior valor      231.6  Eventos Outbox publicados (últimos 5min)
 COM DADO  painel  5  séries  1  maior valor      1.556  Taxa de Eventos Processados (ev/s)
-COM DADO  painel  6  séries  1  maior valor     0.8548  Latência HTTP — Consolidado (p50 / p95)
-COM DADO  painel  6  séries  1  maior valor    0.03125  Latência HTTP — Consolidado (p50 / p95)
+COM DADO  painel  6  séries  1  maior valor     0.8548  Latência HTTP: Consolidado (p50 / p95)
+COM DADO  painel  6  séries  1  maior valor    0.03125  Latência HTTP: Consolidado (p50 / p95)
 COM DADO  painel  7  séries  1  maior valor          0  Retries do Consumer (últimos 5min)
 COM DADO  painel  8  séries  1  maior valor          0  Mensagens na DLQ (últimos 5min)
 COM DADO  painel  9  séries  2  maior valor   41670000  Heap Node.js (ambos os serviços)

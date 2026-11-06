@@ -2,7 +2,7 @@
 
 **Status:** Aceito  
 **Data:** 2026-11-05  
-**Detalhes operacionais:** [seguranca.md](../seguranca.md)
+Detalhes operacionais: [seguranca.md](../seguranca.md)
 
 ## Contexto
 
@@ -15,14 +15,14 @@ Além disso, não havia noção de autorização: qualquer token válido podia t
 
 ## Decisão
 
-- **Provedor de identidade:** Keycloak, com um realm `caixa`. Os integradores são clientes OAuth2 confidenciais no fluxo **client credentials**, sem usuários humanos.
-- **Validação nos serviços:** os dois serviços verificam o JWT por conta própria (assinatura **RS256** pelo JWKS, `iss`, `aud`, `exp`), com o algoritmo fixado. Não há segredo de assinatura nos serviços.
-- **Autorização por escopo:** `lancamentos.write`, `lancamentos.read` e `consolidado.read`. Cada rota exige o seu.
-- **Audiência por API:** os escopos carregam um mapper de audiência. Um token emitido para o consolidado não é aceito pelo lançamentos, mesmo que traga um escopo de nome parecido.
-- **Comerciante amarrado à credencial:** o `comerciante_id` é um claim fixo configurado **no cliente** pelo administrador do realm. O integrador não escolhe e o serviço nunca lê o comerciante do corpo.
-- **Token curto:** 300 s e sem refresh. A revogação imediata não existe; a janela de risco é a validade.
-- **`/auth/login` removido** dos dois serviços, junto com `JWT_SECRET` e a dependência `jsonwebtoken`.
-- **Falha do provedor é 503, não 401.** Se não for possível obter o JWKS, a resposta é 503 com `Retry-After`. 401 fica para token realmente inválido.
+- Provedor de identidade: Keycloak, com um realm `caixa`. Os integradores são clientes OAuth2 confidenciais no fluxo **client credentials**, sem usuários humanos.
+- Validação nos serviços: os dois serviços verificam o JWT por conta própria (assinatura RS256 pelo JWKS, `iss`, `aud`, `exp`), com o algoritmo fixado. Não há segredo de assinatura nos serviços.
+- Autorização por escopo: `lancamentos.write`, `lancamentos.read` e `consolidado.read`. Cada rota exige o seu.
+- Audiência por API: os escopos carregam um mapper de audiência. Um token emitido para o consolidado não é aceito pelo lançamentos, mesmo que traga um escopo de nome parecido.
+- Comerciante amarrado à credencial: o `comerciante_id` é um claim fixo configurado **no cliente** pelo administrador do realm. O integrador não escolhe e o serviço nunca lê o comerciante do corpo.
+- Token curto: 300 s e sem refresh. A revogação imediata não existe; a janela de risco é a validade.
+- `/auth/login` removido dos dois serviços, junto com `JWT_SECRET` e a dependência `jsonwebtoken`.
+- Falha do provedor é 503, não 401. Se não for possível obter o JWKS, a resposta é 503 com `Retry-After`. 401 fica para token realmente inválido.
 
 ## Alternativas
 
@@ -42,7 +42,7 @@ Dá identidade forte ao cliente, mas não expressa escopos nem o vínculo com o 
 É o serviço de identidade gerenciado do Google Cloud e fala OIDC, mas é voltado à autenticação de **usuários finais**. O consumo desta solução é de máquina a máquina, pelo fluxo *client credentials*, e eu **não confirmei** que o produto o ofereça; se não oferecer, ele não substitui o Keycloak aqui. Mesmo que oferecesse, a troca **não seria só configuração** (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`): os claims e os nomes dos escopos mudam, e o claim `comerciante_id` exigiria um mecanismo de geração de token. A validação em `auth.ts` precisaria aceitar esses formatos. Confirmar na documentação do produto antes de decidir diferente; a comparação de custo está em [custos.md](../custos.md).
 
 ### Apigee como emissor de token OAuth2
-O Apigee, produto de gerenciamento de APIs do Google Cloud, pode atuar como servidor de autorização e emitir tokens OAuth2 no fluxo *client credentials*, com cadastro de aplicativos, produtos de API, quotas e portal para o integrador. Eu o cito como alternativa real ao Keycloak em produção, mas **não confirmei** os detalhes do token emitido (formato JWT assinado com RS256, publicação de JWKS, claims e escopos personalizados como o `comerciante_id`); isso precisa ser verificado na documentação antes de decidir.
+O Apigee, produto de gerenciamento de APIs do Google Cloud, pode atuar como servidor de autorização e emitir tokens OAuth2 no fluxo *client credentials*, com cadastro de aplicativos, produtos de API, quotas e portal para o integrador. Eu o cito como alternativa real ao Keycloak em produção, mas não confirmei os detalhes do token emitido (formato JWT assinado com RS256, publicação de JWKS, claims e escopos personalizados como o `comerciante_id`); isso precisa ser verificado na documentação antes de decidir.
 
 Quando faria sentido trocar o Keycloak por ele:
 - a empresa já tem o Apigee contratado e uma equipe que o opera;
@@ -59,10 +59,10 @@ Permitiria revogação imediata, ao custo de uma chamada ao provedor por requisi
 
 ### Por que 401, e não 403, para um token com audiência errada
 
-Um token do `bi-loja-1` (audiência `consolidado-api`) enviado ao lançamentos recebe **401**, e não 403. A distinção segue a RFC 6750:
+Um token do `bi-loja-1` (audiência `consolidado-api`) enviado ao lançamentos recebe 401, e não 403. A distinção segue a RFC 6750:
 
-- **401 `invalid_token`**: o token não é válido **para este recurso**. Assinatura, emissor, expiração e **audiência** definem para quem o token foi emitido. Um token cuja audiência não inclui a API chamada é, para essa API, um token inválido, do mesmo modo que um token expirado.
-- **403 `insufficient_scope`**: o token é válido para a API, mas não carrega o escopo que a rota exige. A RFC 6750 reserva esse erro à insuficiência de privilégio.
+- 401 `invalid_token`: o token não é válido **para este recurso**. Assinatura, emissor, expiração e **audiência** definem para quem o token foi emitido. Um token cuja audiência não inclui a API chamada é, para essa API, um token inválido, do mesmo modo que um token expirado.
+- 403 `insufficient_scope`: o token é válido para a API, mas não carrega o escopo que a rota exige. A RFC 6750 reserva esse erro à insuficiência de privilégio.
 
 Tratar audiência errada como 403 faria a API reconhecer e "autorizar" a identidade de um token que não foi emitido para ela, e revelaria a um chamador não autorizado que a credencial é legítima. Com 401 a API se comporta do mesmo jeito para qualquer token que não seja dela. Quem precisa demonstrar o 403 usa o `contabil-loja-1`, que tem as duas audiências e só o escopo de leitura: ao gravar no lançamentos recebe 403 `insufficient_scope`.
 
@@ -75,25 +75,25 @@ Para saber quanto a autenticação pesa por requisição, o benchmark `npm run b
 | 1 | 0,471 / 0,304 / 1,050 ms | 0,914 / 0,615 / 2,039 ms | 0,443 ms |
 | 2 | 0,509 / 0,315 / 1,247 ms | 0,976 / 0,637 / 2,482 ms | 0,467 ms |
 
-Em ambas, o JWKS foi buscado uma vez nas 22.000 requisições (o resto vem do cache). A validação custa **cerca de 0,3 ms na mediana e 0,45 ms na média** por requisição, e algo como 1 ms no p95 dessa máquina. A 50 req/s, isso é uma fração de um núcleo.
+Em ambas, o JWKS foi buscado uma vez nas 22.000 requisições (o resto vem do cache). A validação custa cerca de 0,3 ms na mediana e 0,45 ms na média por requisição, e algo como 1 ms no p95 dessa máquina. A 50 req/s, isso é uma fração de um núcleo.
 
-Isso responde à pergunta sobre a diferença entre o p95 de 12 ms medido na fase 2 e o de 24,6 ms medido na fase 3: **a validação do JWT explica, no máximo, 1 ms dessa diferença de cerca de 12 ms**. O restante não é atribuível ao JWT. O que se mediu depois sobre as outras causas:
+Entre a versão sem Keycloak (commit `98f9fb2`, p95 de 12 ms a 50 req/s) e a com Keycloak (commit `fa194eb`, p95 de 24,6 ms) o p95 subiu cerca de 12 ms. A validação do JWT explica no máximo 1 ms dessa diferença; o restante não é atribuível a ela. O que se mediu sobre as outras causas:
 
-- O **tracing** custa mais que o JWT: com ele ligado, a mediana do consolidado a 50 req/s subiu de 5,9, 6,3 e 6,1 ms para 8,7, 11,4 e 9,1 ms em três rodadas alternadas (cerca de 3 ms a mais; `docs/evidencias/custo-tracing-ablacao.txt`). A medição foi feita com o Jaeger parado, então inclui o custo de criar os spans e de falhar ao exportá-los. O tracing não existia nas medições das fases 2 e 3, então ele não explica aquela diferença; ele entra em quem liga o OpenTelemetry agora.
-- A **variação entre execuções** é grande. Nas medições da fase 4, execuções idênticas deram p95 de 75 a 150 ms com a mesma mediana de cerca de 6 ms, e uma degradação de latência apareceu em várias configurações (investigação em `docs/evidencias/regressao-latencia.txt`). Os p95 de 12 e 24,6 ms foram medidos em momentos diferentes e, na própria fase 3, a primeira rodada do k6, logo depois de reiniciar o Keycloak, deu p95 de 80 ms contra 24,6 ms na segunda, com o mesmo código. Não tenho como separar quanto da diferença é variação de execução.
+- O **tracing** custa mais que o JWT: com ele ligado, a mediana do consolidado a 50 req/s subiu de 5,9, 6,3 e 6,1 ms para 8,7, 11,4 e 9,1 ms em três rodadas alternadas (cerca de 3 ms a mais; `docs/evidencias/custo-tracing-ablacao.txt`). A medição foi feita com o Jaeger parado, então inclui o custo de criar os spans e de falhar ao exportá-los. O tracing não existia nas versões `98f9fb2` e `fa194eb`, então não explica aquela diferença; ele soma custo para quem liga o OpenTelemetry.
+- A **variação entre execuções** é grande. Na versão com tracing ligado por padrão (`71a4ce2`), execuções idênticas deram p95 de 75 a 150 ms com a mesma mediana de cerca de 6 ms, e uma degradação de latência apareceu em várias configurações (investigação em `docs/evidencias/regressao-latencia.txt`). Os p95 de 12 e 24,6 ms foram medidos em momentos diferentes e, na versão `fa194eb`, a primeira rodada do k6, logo depois de reiniciar o Keycloak, deu p95 de 80 ms contra 24,6 ms na segunda, com o mesmo código. Não tenho como separar quanto da diferença é variação de execução.
 
-Resumindo: o custo da autenticação é pequeno e medido; a diferença entre 12 e 24,6 ms não é o JWT.
+Conclusão: o custo da autenticação é pequeno e medido; a diferença entre 12 e 24,6 ms não é o JWT.
 
 ## Consequências
 
-**Positivas:**
+Positivas:
 - Nenhum serviço consegue emitir token. Só o provedor assina.
 - Consumo com privilégio mínimo: o BI só lê o consolidado, a contabilidade lê mas não grava, comprovado com os clientes `bi-loja-1` e `contabil-loja-1`.
 - O isolamento entre comerciantes agora depende de uma credencial, não de uma declaração do chamador.
 - O Keycloak fora do ar não derruba as APIs para quem já tem token, e a rotação de chaves é absorvida sem reinício.
 - Os logs registram cliente e comerciante, e o cabeçalho `Authorization` é redigido.
 
-**Negativas:**
+Negativas:
 - Mais um componente para operar. No ambiente local o Keycloak em modo desenvolvimento usou cerca de 400 MiB de memória (observado com `docker stats`) e leva alguns minutos para ficar saudável na primeira subida, por causa do pull da imagem e da importação do realm.
 - Um token roubado vale até expirar (até 300 s).
 - O segredo do cliente é compartilhado entre o Keycloak e o integrador; vazá-lo permite emitir tokens daquele cliente. A evolução é `private_key_jwt` ou mTLS.
