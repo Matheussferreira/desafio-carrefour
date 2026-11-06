@@ -17,6 +17,7 @@ São correções e provas que o próprio projeto já identificou como lacuna. O 
 | Validação de custos e capacidade no Google Cloud | Todos os números de [custos.md](custos.md) e [dimensionamento.md](dimensionamento.md) são estimativas ou hipóteses | Antes de qualquer compromisso de orçamento, com a calculadora do Google Cloud e um teste de carga no GKE | M |
 | Rate limit distribuído e por cliente | O limite é em memória, por instância e por IP; atrás de um balanceador todos os clientes compartilham um IP ([seguranca.md](seguranca.md)) | Mais de uma réplica por serviço, o que é o mínimo de produção | M |
 | Rodar o CI no GitHub | O fluxo foi escrito e só teve a sintaxe validada | Quando o repositório for publicado | P |
+| Atualizar o RabbitMQ e o Keycloak | O RabbitMQ 3.13 (`docker-compose.yml` e `docker-compose.integration.yml`) saiu do suporte comunitário; subir para a série 4 e conferir a compatibilidade das filas (declarações, argumentos de DLX e DLQ) e do `amqplib`, além de rodar a suíte de integração e a de resiliência. O Keycloak está fixado em 26.0.7; subir para o patch mais recente da linha 26 e conferir a importação do `realm-caixa.json` e os claims dos tokens | Antes de qualquer ambiente produtivo, ou aviso de segurança que afete as versões atuais | P |
 
 ## Prioridade 1: primeiros meses de operação
 
