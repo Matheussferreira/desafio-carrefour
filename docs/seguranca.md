@@ -61,7 +61,7 @@ Definidos em [keycloak/realm-caixa.json](../keycloak/realm-caixa.json). Os segre
 1. Criar um cliente confidencial no realm, com **service account** e sem fluxos interativos.
 2. Conceder apenas os **escopos mínimos** para o caso de uso. Leitura e escrita são escopos separados.
 3. Fixar o `comerciante_id` no cliente por mapper. O consumidor não escolhe em nome de quem age.
-4. Guardar o segredo no cofre do consumidor (em produção, AWS Secrets Manager) e definir rotação.
+4. Guardar o segredo no cofre do consumidor (em produção, o Secret Manager do Google Cloud do lado do cliente, ou o cofre que o integrador já usa) e definir rotação.
 5. Informar o consumidor sobre `X-Idempotency-Key` para escritas e sobre os limites de taxa.
 
 ## Resiliência da autenticação
@@ -107,7 +107,7 @@ O `X-Idempotency-Key` é uma string opaca de 1 a 255 caracteres, **escopada por 
 
 - Configuração por variáveis de ambiente; `.env` fora do Git e `.env.example` com valores só para desenvolvimento.
 - Os serviços **não guardam segredo de assinatura**: validam com a chave pública do JWKS. Não existe mais `JWT_SECRET`.
-- Os segredos dos clientes no `realm-caixa.json` são de desenvolvimento. Em produção ficam no Secrets Manager e são rotacionados.
+- Os segredos dos clientes no `realm-caixa.json` são de desenvolvimento. Em produção ficam no Secret Manager, lidos por Workload Identity, e são rotacionados.
 
 ### Cabeçalhos e tamanho de corpo
 
@@ -145,12 +145,12 @@ O `X-Idempotency-Key` é uma string opaca de 1 a 255 caracteres, **escopada por 
 
 | Limitação | Por que importa | Evolução |
 |---|---|---|
-| Keycloak em modo desenvolvimento (banco embutido, HTTP) | Sem persistência e sem TLS | Keycloak em modo produção com PostgreSQL próprio e TLS, ou Amazon Cognito na AWS (mesmo contrato OIDC) |
+| Keycloak em modo desenvolvimento (banco embutido, HTTP) | Sem persistência e sem TLS | Keycloak em modo produção com PostgreSQL próprio e TLS. O Identity Platform não substitui o Keycloak aqui: é voltado a usuários finais, e o consumo desta solução é por *client credentials* ([custos.md](custos.md)) |
 | Autenticação do cliente por segredo compartilhado | Quem vaza o segredo emite tokens | `private_key_jwt` ou mTLS (RFC 8705) para os integradores mais sensíveis |
 | Sem revogação imediata | Um token roubado vale até expirar (até 300 s) | Manter a validade curta; introspecção só se o risco justificar o custo de uma chamada por requisição |
-| `/metrics` sem autenticação | Expõe métricas operacionais a quem alcança a porta | Restringir por rede (security group) ou scrape autenticado |
+| `/metrics` sem autenticação | Expõe métricas operacionais a quem alcança a porta | Restringir por política de rede do Kubernetes e por regra de firewall da VPC, ou usar coleta autenticada (o Managed Service for Prometheus coleta de dentro do cluster) |
 | Rate limit por IP e em memória | Atrás de um balanceador, todos compartilham o IP; com várias réplicas, o limite é por réplica | Limite por cliente (`azp`) em Redis, ou no gateway |
-| HTTP sem TLS entre cliente e API | Token em texto claro em rede aberta | TLS no ALB/ingress; mTLS interno |
+| HTTP sem TLS entre cliente e API | Token em texto claro em rede aberta | TLS no balanceador; mTLS interno |
 
 ## Controles propostos para produção
 
@@ -158,12 +158,12 @@ Nada desta seção está implementado no ambiente local. São a arquitetura alvo
 
 | Tema | Proposta | Observações |
 |---|---|---|
-| **mTLS entre serviços** | Malha de serviço (por exemplo AWS App Mesh ou Istio) ou certificados emitidos pela AWS Private CA, com rotação automática, entre ALB, serviços, Keycloak, Redis e broker | Impede que um processo qualquer na VPC converse com as APIs. Para integradores externos sensíveis, autenticação do cliente por certificado (RFC 8705) como complemento ao token |
-| **API Gateway com WAF e throttling** | Amazon API Gateway ou ALB com AWS WAF (conjunto gerenciado OWASP, regras por taxa e por IP). Plano de uso e limite por cliente (chave do token), em vez de por IP | Resolve a limitação do rate limit por IP atrás de balanceador e cobre a detecção de abuso de fluxo (API6) |
-| **Segredos** | AWS Secrets Manager para senhas do banco, do broker e segredos de cliente OAuth2, com rotação automática; leitura por papel IAM da tarefa, nunca por variável gravada em imagem ou repositório | Os segredos do `realm-caixa.json` são descartados. Evolução para `private_key_jwt` elimina o segredo compartilhado |
-| **Criptografia em trânsito** | TLS 1.2 ou superior em toda conexão: cliente até o gateway, `amqps://` no broker, `sslmode=verify-full` no PostgreSQL, TLS no Redis (ElastiCache) e no Keycloak | HSTS já é enviado pelo helmet |
-| **Criptografia em repouso** | KMS com chave gerenciada pelo cliente (CMK) para RDS, volumes do broker, ElastiCache, S3 de backups, CloudWatch Logs e Secrets Manager. Rotação anual da chave | Política de chave separando quem administra de quem usa |
-| **Trilha de auditoria imutável** | CloudTrail para acesso a segredos, chaves e configuração, entregue em bucket S3 com Object Lock (modo compliance) e validação de integridade; logs de aplicação (cliente, comerciante, operação) enviados ao CloudWatch e arquivados no mesmo tipo de bucket | Os lançamentos já são imutáveis por desenho, e o Outbox guarda o histórico de eventos |
+| **mTLS entre serviços** | Malha de serviço (por exemplo Cloud Service Mesh ou Istio) ou certificados emitidos pelo Certificate Authority Service, com rotação automática, entre o balanceador, os serviços, o Keycloak, o Redis e o broker | Impede que um processo qualquer na VPC converse com as APIs. Para integradores externos sensíveis, autenticação do cliente por certificado (RFC 8705) como complemento ao token |
+| **Borda: Cloud Armor e API Gateway (ou Apigee)** | Cloud Armor no balanceador, com as regras OWASP pré-configuradas e limite de taxa por IP. Quota por cliente (claim `azp` do token) no API Gateway, ou no Apigee se houver muitos integradores externos que precisem de portal e análise | O Cloud Armor não enxerga o claim do token, então a quota por cliente é do gateway. Resolve a limitação do rate limit por IP atrás de balanceador e cobre a detecção de abuso de fluxo (API6) |
+| **Segredos** | Secret Manager para senhas do banco e segredos de cliente OAuth2, com rotação; leitura por Workload Identity da conta de serviço de cada pod, nunca por variável gravada em imagem ou repositório. Sem chaves de conta de serviço baixadas | Os segredos do `realm-caixa.json` são descartados. Evolução para `private_key_jwt` elimina o segredo compartilhado |
+| **Criptografia em trânsito** | TLS 1.2 ou superior em toda conexão: cliente até o balanceador, `sslmode=verify-full` no PostgreSQL (Cloud SQL), TLS no Memorystore e no Keycloak. O Pub/Sub é acessado por TLS | HSTS já é enviado pelo helmet |
+| **Criptografia em repouso** | Cloud KMS com chave gerenciada pelo cliente (CMEK) para o Cloud SQL, o Pub/Sub, o Memorystore, o Secret Manager e os buckets de backup e de auditoria. Rotação automática da chave | Política de chave separando quem administra de quem usa. Proteger contra a destruição acidental de versões de chave |
+| **Trilha de auditoria imutável** | Cloud Audit Logs (atividade administrativa e acesso a dados do Cloud SQL, Secret Manager e KMS), roteados para um bucket do Cloud Storage com retenção bloqueada (*bucket lock*); logs de aplicação (cliente, comerciante, operação) no Cloud Logging, arquivados no mesmo tipo de bucket | Os lançamentos já são imutáveis por desenho, e o Outbox guarda o histórico de eventos |
 
 ## LGPD
 
@@ -174,7 +174,7 @@ As informações abaixo descrevem o que o sistema trata hoje e o que precisa ser
 | **Dados tratados** | Lançamentos: valor, tipo, data e uma descrição livre. Identificadores do comerciante e do cliente de integração (`comerciante_id`, `clienteId`) e logs de acesso. Não há CPF, nome nem dado de consumidor final como campo. O risco está na **descrição livre**, onde o integrador pode digitar nome de pessoa, documento ou outro dado pessoal |
 | **Mitigação da descrição** | O limite é de 500 caracteres. Orientar o integrador a não enviar dado pessoal nesse campo; se o negócio exigir, tratá-lo como dado pessoal (mascaramento em log, direito de eliminação) |
 | **Base legal (proposta)** | Execução de contrato com o comerciante (art. 7, V) para o registro do fluxo de caixa, e cumprimento de obrigação legal ou regulatória (art. 7, II) para a guarda de registros contábeis e fiscais. A validação cabe ao DPO |
-| **Retenção (proposta)** | Lançamentos e saldos: pelo prazo legal de guarda contábil e fiscal, a confirmar com o jurídico (a referência usual é de cinco anos ou mais conforme a obrigação aplicável). Logs de aplicação: prazo curto e configurável (por exemplo 90 dias no CloudWatch, depois arquivo imutável). Eventos processados e DLQ: purga periódica |
+| **Retenção (proposta)** | Lançamentos e saldos: pelo prazo legal de guarda contábil e fiscal, a confirmar com o jurídico (a referência usual é de cinco anos ou mais conforme a obrigação aplicável). Logs de aplicação: prazo curto e configurável (por exemplo 90 dias no Cloud Logging, depois arquivo imutável). Eventos processados e DLQ: purga periódica |
 | **Eliminação e anonimização** | Como o lançamento é imutável, a eliminação por pedido do titular se resolve por anonimização do campo `descricao`, mantendo valor, tipo e data. Esse procedimento ainda não está implementado |
 | **Direitos do titular** | Os dados do consumidor final não são tratados como campo estruturado, então o fluxo de atendimento fica no comerciante, que é o controlador; o banco atua como operador. Papéis a formalizar em contrato |
 | **Incidentes** | Auditoria e alertas permitem identificar o escopo (quem acessou o quê); o processo de comunicação à ANPD e aos titulares é organizacional |
@@ -185,22 +185,24 @@ As informações abaixo descrevem o que o sistema trata hoje e o que precisa ser
 
 | Camada | Controle |
 |---|---|
-| Borda | AWS WAF (OWASP Core Rule Set) no ALB; TLS terminando no ALB |
-| Rede | VPC com sub-redes privadas; serviços e Keycloak sem exposição direta à internet |
+| Borda | Cloud Armor (regras OWASP pré-configuradas) no balanceador; TLS terminando no balanceador |
+| Rede | VPC com cluster privado; serviços e Keycloak sem exposição direta à internet; VPC Service Controls em volta de Cloud SQL, Pub/Sub, Secret Manager, KMS e Cloud Storage |
 | Aplicação | JWT (RS256, iss, aud, exp), escopos, comerciante amarrado, validação de entrada, rate limiting |
-| Identidade | Keycloak em modo produção ou Cognito; rotação de segredos de cliente |
-| Broker | TLS (`amqps://`) e usuário por serviço |
-| Banco | Senhas no Secrets Manager; acesso só de dentro da VPC por Security Group |
-| Auditoria | Logs com cliente e comerciante; CloudTrail para segredos e configuração |
+| Identidade | Keycloak em modo produção; rotação de segredos de cliente. Identidade das cargas: Workload Identity, sem chaves de conta de serviço; acesso administrativo pelo IAP |
+| Broker | Pub/Sub com uma conta de serviço por papel (publicador só no tópico de eventos, assinante só na assinatura) e CMEK. No ambiente local, RabbitMQ com TLS (`amqps://`) e usuário por serviço |
+| Banco | Senhas no Secret Manager; acesso só por IP privado e pelo Cloud SQL Auth Proxy, com autenticação IAM quando possível |
+| Auditoria | Logs com cliente e comerciante; Cloud Audit Logs para segredos, chaves e configuração |
 
 ### Checklist de deploy
 
 - [ ] Keycloak em modo produção (PostgreSQL, TLS), sem o console administrativo exposto à internet
-- [ ] Segredos dos clientes no Secrets Manager, com rotação, e os do `realm-caixa.json` descartados
-- [ ] TLS em todas as conexões externas (clientes, banco, broker, Redis, Keycloak)
-- [ ] `/metrics` restrito por rede
-- [ ] WAF habilitado no ALB com o conjunto OWASP
-- [ ] Security Groups com privilégio mínimo
-- [ ] Imagens escaneadas (ECR Image Scanning); a imagem já roda sem root (usuário `node`)
+- [ ] Segredos dos clientes no Secret Manager, com rotação, e os do `realm-caixa.json` descartados
+- [ ] TLS em todas as conexões externas (clientes, banco, Redis, Keycloak e broker)
+- [ ] `/metrics` restrito por política de rede e firewall
+- [ ] Cloud Armor habilitado no balanceador com as regras OWASP pré-configuradas
+- [ ] Papéis do IAM em nível de recurso, com privilégio mínimo, e Workload Identity sem chaves de conta de serviço
+- [ ] Imagens escaneadas (varredura do Artifact Registry); a imagem já roda sem root (usuário `node`)
 - [ ] Limite de taxa ajustado ao tráfego real, por cliente
-- [ ] CloudTrail habilitado para auditoria de acesso a segredos
+- [ ] Cloud Audit Logs de acesso a dados habilitados para segredos e chaves, com o destino em bucket de retenção bloqueada
+- [ ] Chaves de criptografia (CMEK) criadas no Cloud KMS, com rotação automática e proteção contra a destruição acidental
+- [ ] Perímetro do VPC Service Controls validado em modo de teste (*dry run*) e depois em modo de aplicação

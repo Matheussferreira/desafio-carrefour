@@ -11,7 +11,7 @@ Com dois microsserviços, precisamos decidir a estratégia de banco de dados: ba
 
 **Banco por serviço:** `lancamentos_db` e `consolidado_db` na mesma instância PostgreSQL, mas nenhum serviço acessa o banco do outro.
 
-> Mesma instância Postgres para simplificar o ambiente local. Em produção, seriam instâncias RDS separadas.
+> Mesma instância Postgres para simplificar o ambiente local. Em produção, seriam instâncias Cloud SQL separadas.
 
 ## Alternativas
 

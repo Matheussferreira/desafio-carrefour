@@ -155,6 +155,35 @@ docker compose --profile observability up -d --wait
 | Mensagens retidas por falha transitória | 0 em operação normal | `rate(consolidado_consumer_transient_errors_total[5m]) > 0` por mais de 5 min → banco do consolidado fora ou instável |
 | Lag de consistência (lançamento → saldo) | < 5s em p99 | > 30s → investigar relay ou broker |
 
-As regras estão em `observability/alerts.yml`, validadas com o `promtool` e carregadas pelo Prometheus do profile `observability` (aba Alerts em http://localhost:9090/alerts). Cobrem alvo fora do ar, mensagem na DLQ, retenção por falha transitória, broker desconectado (relay e consolidado), outbox atrasado, lag de consistência acima de 30 s e taxa de 5xx (acima de 5% no consolidado e de 1% em lançamentos). A prova foi parar o consolidado: `AlvoForaDoAr` passou a `firing` e voltou a vazio quando ele subiu. O envio para uma pessoa (Alertmanager, CloudWatch) não está configurado ([evolucoes.md](evolucoes.md)).
+As regras estão em `observability/alerts.yml`, validadas com o `promtool` e carregadas pelo Prometheus do profile `observability` (aba Alerts em http://localhost:9090/alerts). Cobrem alvo fora do ar, mensagem na DLQ, retenção por falha transitória, broker desconectado (relay e consolidado), outbox atrasado, lag de consistência acima de 30 s e taxa de 5xx (acima de 5% no consolidado e de 1% em lançamentos). A prova foi parar o consolidado: `AlvoForaDoAr` passou a `firing` e voltou a vazio quando ele subiu. O envio para uma pessoa (Alertmanager ou o canal de notificação do Cloud Monitoring) não está configurado ([evolucoes.md](evolucoes.md)).
 
 Alertas baseados em `consolidado_consumer_dlq_total` e `consolidado_consumer_retries_total` são especialmente importantes: um spike de retries indica problema transiente (ex: banco sobrecarregado); mensagens na DLQ indicam problema persistente (ex: payload inválido ou bug no processamento) que requer intervenção manual.
+
+---
+
+## Em produção no Google Cloud
+
+O que existe hoje é o Prometheus, o Grafana e o Jaeger locais. No Google Cloud o desenho alvo ([arquitetura-alvo-cloud.md](arquitetura-alvo-cloud.md)) usa os serviços gerenciados, sem mudar o que os serviços emitem.
+
+| Sinal | Hoje (local) | Produção (Google Cloud) | O que muda |
+|---|---|---|---|
+| Métricas | Prometheus raspa `/metrics` | Managed Service for Prometheus: um recurso de coleta (`PodMonitoring`) por serviço; os dados ficam no Cloud Monitoring | Só a configuração de coleta. As métricas e os rótulos são os mesmos |
+| Alertas | `observability/alerts.yml` | As mesmas regras PromQL como regras gerenciadas, ou políticas de alerta do Cloud Monitoring com PromQL | Portar o arquivo. O envio é por canais de notificação, a configurar |
+| Traces | OTLP para o Jaeger | OTLP para o Cloud Trace, direto ao endpoint de telemetria do Google ou por um coletor OpenTelemetry (validar qual) | Só `OTEL_EXPORTER_OTLP_ENDPOINT` e a autenticação por Workload Identity |
+| Logs | JSON no stdout (pino) | Cloud Logging, coletado do stdout dos pods | **Ajuste de código pequeno:** o Cloud Logging lê a gravidade do campo `severity` e o texto de `message`, e o pino emite `level` numérico e `msg`. É preciso mapear esses campos no logger e acrescentar o campo de correlação com o trace. Ainda não foi feito |
+| Painéis | Grafana local | Cloud Monitoring, ou um Grafana próprio lendo do Cloud Monitoring | Reaproveitar as consultas PromQL do dashboard |
+| Auditoria | n/a | Cloud Audit Logs | Ver [seguranca.md](seguranca.md) |
+
+### Alertas específicos do Google Cloud
+
+Além das regras de `observability/alerts.yml` (que cobrem DLQ, outbox, lag, conexão do broker e 5xx), o Pub/Sub e o banco trazem métricas próprias do Cloud Monitoring que valem alerta:
+
+- Atraso da assinatura do consolidado: mensagens não entregues e idade da mensagem mais antiga acima de um limite (equivale ao `consolidado_evento_lag_seconds` visto do lado do broker).
+- Mensagens no tópico de mensagens mortas.
+- CPU do Cloud SQL acima de 70% por mais de 10 minutos, conexões próximas do limite e espaço em disco.
+- Taxa de 5xx no balanceador acima de 1% por 5 minutos.
+
+### Rede e borda
+
+- Registros do Cloud Armor (requisições bloqueadas e permitidas por regra).
+- VPC Flow Logs e logs de firewall para visibilidade de tráfego entre sub-redes de dados e aplicação, com alerta para tráfego incomum para as sub-redes de dados.

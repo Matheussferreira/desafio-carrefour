@@ -46,7 +46,7 @@ graph TD
 
 **Objetivo:** Ponto de controle de roteamento sem alterar comportamento.
 
-1. Instalar API Gateway (AWS ALB, Kong ou Nginx) na frente do monolito
+1. Instalar API Gateway (Cloud Load Balancing, Kong ou Nginx) na frente do monolito
 2. Todos os requests continuam indo para o legado: zero mudança funcional
 3. Validar que latência e taxa de erro se mantêm iguais ao baseline pré-proxy
 

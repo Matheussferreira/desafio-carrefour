@@ -1,7 +1,7 @@
-# ADR-003: RabbitMQ vs. Kafka vs. SQS
+# ADR-003: RabbitMQ vs. Kafka vs. Pub/Sub
 
 **Status:** Aceito  
-**Data:** 2026-06-24
+**Data:** 2026-06-24 (revisado em 2026-11-05)
 
 ---
 
@@ -14,12 +14,13 @@ Parâmetros do sistema:
 - Tamanho da mensagem: < 1 KB
 - Padrão de consumo: um único consumer group, sem necessidade de replay
 - Restrição operacional: deve rodar em `docker compose up` sem conta em cloud
+- Nuvem alvo de produção: Google Cloud (revisão de 2026-11-05)
 
 ---
 
 ## Decisão
 
-**RabbitMQ 3.13** com topic exchange, fila durável com DLX configurada.
+**RabbitMQ 3.13** com topic exchange, fila durável com DLX configurada, **para desenvolvimento, testes e como implementação de referência**. Em produção no Google Cloud o broker é o **Pub/Sub**, decidido no [ADR-012](ADR-012-broker-em-producao-no-gcp.md). O RabbitMQ no GKE fica como plano B, porque o código de hoje o suporta sem alteração.
 
 ---
 
@@ -47,15 +48,16 @@ Kafka é projetado para volumes de 100k a 1M+ msg/s com múltiplos consumer grou
 
 Nenhum desses triggers existe neste sistema. Usar Kafka aqui seria otimizar para um problema que não existe.
 
-### Amazon SQS + SNS (descartado: vendor lock-in e sem local)
+### Google Pub/Sub (descartado como padrão local; escolhido para produção no ADR-012)
 
-**Por que foi descartado:**
-- Sem suporte local sem LocalStack, que adiciona complexidade ao `docker compose up` e divergência entre ambientes
-- Polling mínimo de ~1s adiciona latência desnecessária para um consumer que deve ser quasi-realtime
-- Vendor lock-in: o sistema ficaria acoplado à AWS sem nenhum ganho funcional a esse volume
-- Sem management UI local para debugging
+**Por que não é o broker do ambiente local:**
+- Não roda em `docker compose up` sem o emulador do Google, que é uma imagem à parte, não tem interface de gerenciamento e se comporta de forma diferente do serviço real em detalhes como prazo de confirmação e política de mensagens mortas.
+- Prenderia o desenvolvimento e os testes a uma biblioteca de uma nuvem específica.
+- Não há fila para "ver" como no painel do RabbitMQ, o que atrapalha o debug.
 
-**Quando SQS/SNS seria a escolha correta:** Em um sistema já hospedado na AWS onde a equipe quer eliminar a operação do broker. Nesse caso, SQS para filas simples e SNS+SQS para fan-out são escolhas sólidas: o managed service elimina o custo operacional do Kafka/RabbitMQ. A escolha entre broker self-hosted e SQS é principalmente operacional, não técnica.
+**Por que é a escolha de produção no Google Cloud:** é gerenciado, regional, com replicação entre zonas, sem cluster para operar, e a cobrança é por volume de dados (este sistema cabe na franquia gratuita). Mensagem de menos de 1 KB, um único consumidor e entrega pelo menos uma vez casam com o modelo. O preço é escrever e testar um adaptador: o código de hoje só fala AMQP. O que muda, o que continua valendo (outbox, confirmação, consumidor idempotente) e o que é preciso ter cuidado (tópico sem assinatura descarta; contagem de tentativas na DLQ) está no ADR-012.
+
+**Quando seria a escolha também no local:** se a equipe adotar o emulador como padrão e o conjunto de testes rodar nos dois adaptadores.
 
 ### Redis Streams (descartado: Redis já é cache aqui)
 
@@ -82,4 +84,5 @@ Redis Streams pode fazer o papel de broker simples. Descartado porque: não há 
 **Negativas:**
 - Sem replay nativo: mensagens consumidas são descartadas (mitigado pelo Outbox que preserva no banco)
 - Single-node neste setup: sem clustering, sem quorum queues; mensagens não replicadas são perdidas se o broker morrer antes de serem consumidas (ver decisões de produção no README)
-- Se o volume crescer para dezenas de milhares de req/s, migrar para Kafka (na AWS, o Amazon MSK) seria necessário
+- Se o volume crescer para dezenas de milhares de req/s, migrar para Kafka (no Google Cloud, o Managed Service for Apache Kafka) seria necessário
+- O broker de produção (Pub/Sub) não é o broker dos testes: ver as consequências no ADR-012

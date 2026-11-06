@@ -1,6 +1,6 @@
 # Controle de Fluxo de Caixa
 
-Um comerciante registra débitos e créditos ao longo do dia e precisa do **saldo diário consolidado**. A solução tem dois microsserviços que nunca se chamam diretamente: **Lançamentos** grava o lançamento e o evento na mesma transação (Outbox), um processo separado (`lancamentos-relay`) publica o evento no RabbitMQ com confirmação do broker, e **Consolidado** consome o evento, aplica um upsert idempotente no próprio banco e serve o saldo com cache no Redis. Se o Consolidado cair, os lançamentos continuam sendo aceitos e o saldo converge quando ele volta.
+Um comerciante registra débitos e créditos ao longo do dia e precisa do **saldo diário consolidado**. A solução tem dois microsserviços que nunca se chamam diretamente: **Lançamentos** grava o lançamento e o evento na mesma transação (Outbox), um processo separado (`lancamentos-relay`) publica o evento no broker (RabbitMQ no ambiente local) com confirmação, e **Consolidado** consome o evento, aplica um upsert idempotente no próprio banco e serve o saldo com cache no Redis. Se o Consolidado cair, os lançamentos continuam sendo aceitos e o saldo converge quando ele volta.
 
 ```mermaid
 graph TD
@@ -178,7 +178,7 @@ O tracing vem desligado por padrão porque acrescenta CPU por requisição ([doc
 |---|---|---|
 | Estilo de arquitetura | Dois microsserviços em vez de monólito | [ADR-001](docs/adrs/ADR-001-microsservicos-vs-monolito.md) |
 | Comunicação | Assíncrona por eventos | [ADR-002](docs/adrs/ADR-002-comunicacao-assincrona.md) |
-| Broker | RabbitMQ em vez de Kafka ou SQS | [ADR-003](docs/adrs/ADR-003-rabbitmq-vs-kafka-vs-sqs.md) |
+| Broker | RabbitMQ em vez de Kafka ou Pub/Sub no ambiente local | [ADR-003](docs/adrs/ADR-003-rabbitmq-vs-kafka-vs-pubsub.md) |
 | Dados | Um banco por serviço | [ADR-004](docs/adrs/ADR-004-banco-por-servico.md) |
 | Publicação confiável | Outbox Pattern | [ADR-005](docs/adrs/ADR-005-outbox-pattern.md) |
 | Leitura | Cache Redis com fallback no banco | [ADR-006](docs/adrs/ADR-006-cache-redis.md) |
@@ -187,6 +187,7 @@ O tracing vem desligado por padrão porque acrescenta CPU por requisição ([doc
 | Saldo | Acumulado na leitura, multi-comerciante, cache versionado | [ADR-009](docs/adrs/ADR-009-saldo-acumulado-e-multi-comerciante.md) |
 | Segurança | OAuth2 client credentials, JWT RS256, escopos | [ADR-010](docs/adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md) |
 | Falhas | Falha transitória não vai para a DLQ | [ADR-011](docs/adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md) |
+| Nuvem alvo | Google Cloud (GKE Autopilot, Cloud SQL, Memorystore) com Pub/Sub como broker de produção | [ADR-012](docs/adrs/ADR-012-broker-em-producao-no-gcp.md) |
 
 Outras escolhas: valores monetários como string na API e `NUMERIC(15,2)` com `decimal.js`; datas de competência como `YYYY-MM-DD`, sem fuso; erros em `application/problem+json`; paginação por cursor.
 
@@ -211,7 +212,7 @@ Variáveis lidas pelos serviços (os valores de desenvolvimento estão no `docke
 | Domínios e capacidades de negócio | [docs/dominios-e-capacidades.md](docs/dominios-e-capacidades.md) |
 | Requisitos funcionais e não funcionais | [docs/requisitos.md](docs/requisitos.md) |
 | Arquitetura (C4, fluxos, cenários de falha) | [docs/arquitetura.md](docs/arquitetura.md) |
-| Arquitetura alvo na nuvem (AWS, com equivalência Azure e GCP) | [docs/arquitetura-alvo-cloud.md](docs/arquitetura-alvo-cloud.md) |
+| Arquitetura alvo na nuvem (Google Cloud, com tabela de equivalência para outras nuvens) | [docs/arquitetura-alvo-cloud.md](docs/arquitetura-alvo-cloud.md) |
 | Transição do legado (Strangler Fig) | [docs/arquitetura-transicao.md](docs/arquitetura-transicao.md) |
 | Decisões (ADRs) | [docs/adrs/](docs/adrs/) |
 | Contrato do evento e versionamento | [docs/eventos.md](docs/eventos.md) |
@@ -229,15 +230,16 @@ Variáveis lidas pelos serviços (os valores de desenvolvimento estão no `docke
 
 O que **não** está provado ou foi simplificado, sem rodeios:
 
-- **Nada foi executado na AWS.** Custos, dimensionamento e metas de RTO e RPO são estimativas e hipóteses; não existe Terraform da AWS no repositório. Failover de RDS, réplica entre regiões e restauração de backup nunca foram exercitados ([custos](docs/custos.md), [disaster-recovery](docs/disaster-recovery.md)).
+- **O adaptador do Pub/Sub não existe.** A nuvem alvo é o Google Cloud e o broker de produção é o Pub/Sub, mas o código só fala RabbitMQ. Antes de qualquer ambiente de produção é preciso escrever o adaptador e rodar os testes de contrato nos dois ([ADR-012](docs/adrs/ADR-012-broker-em-producao-no-gcp.md)).
+- **Nada foi executado no Google Cloud.** Custos, dimensionamento e metas de RTO e RPO são estimativas e hipóteses (os preços do GKE, do Cloud SQL e do Memorystore em São Paulo viraram faixas por não terem sido confirmados em fonte oficial); não existe infraestrutura como código no repositório. Failover do Cloud SQL, restauração de backup e qualquer DR fora de `southamerica-east1` nunca foram exercitados, e o DR em outra região é transferência internacional de dados pela LGPD ([custos](docs/custos.md), [disaster-recovery](docs/disaster-recovery.md)).
 - **O CI nunca foi observado rodando no GitHub.** O fluxo foi escrito e só teve a sintaxe validada; os mesmos comandos rodam localmente.
 - **Carga medida em uma máquina de desenvolvimento**, com uma instância de cada serviço. Houve requisições isoladas lentas (máximo de 3,84 s em uma execução) cuja causa não identifiquei, e uma regressão de latência cuja causa única não consegui provar (investigação em [docs/evidencias/regressao-latencia.txt](docs/evidencias/regressao-latencia.txt)). Não há teste de carga sobre o Lançamentos.
 - **Rate limit em memória, por instância e por IP.** Com mais de uma réplica ou atrás de um balanceador, precisa ir para o Redis ou para o API Gateway.
-- **Consistência eventual.** O saldo reflete um lançamento em segundos, não instantaneamente. O banco de lançamentos continua sendo ponto único de falha para a escrita (Multi-AZ no desenho de produção).
+- **Consistência eventual.** O saldo reflete um lançamento em segundos, não instantaneamente. O banco de lançamentos continua sendo ponto único de falha para a escrita (alta disponibilidade regional do Cloud SQL no desenho de produção).
 - **Infraestrutura local simplificada.** Um Postgres com dois bancos, RabbitMQ de um nó, Redis único, Keycloak em modo de desenvolvimento, HTTP sem TLS, migrations rodando no startup sem lock.
 - **Dados que crescem sem limite**: o outbox e `eventos_processados` não têm rotina de retenção. A `descricao` livre pode conter dado pessoal e não tem política de anonimização.
 - **Lançamentos são imutáveis**, sem estorno. Erro permanente de processamento retém o consumidor por até 7 s antes da DLQ, e o reprocessamento da DLQ é manual.
-- **Os alertas são avaliados no Prometheus, mas não há roteamento** (Alertmanager, CloudWatch) que avise uma pessoa.
+- **Os alertas são avaliados no Prometheus, mas não há roteamento** (Alertmanager ou canais do Cloud Monitoring) que avise uma pessoa.
 - **Tracing desligado por padrão**, por acrescentar CPU por requisição.
 
 A lista priorizada, com o gatilho de cada item, está em [docs/evolucoes.md](docs/evolucoes.md). As diferenças entre este ambiente e produção estão em [docs/arquitetura-alvo-cloud.md](docs/arquitetura-alvo-cloud.md).

@@ -1,144 +1,197 @@
-# Arquitetura alvo: AWS
+# Arquitetura alvo: Google Cloud
 
-Mapeamento do ambiente local para serviços AWS na região `sa-east-1` (São Paulo), com as adaptações de alta disponibilidade para produção. Os números de capacidade e custo estão em [dimensionamento.md](dimensionamento.md) e [custos.md](custos.md), e a recuperação de desastres em [disaster-recovery.md](disaster-recovery.md). Nada aqui foi implantado: é desenho alvo, e não há Terraform da AWS no repositório ([evolucoes.md](evolucoes.md)).
+Mapeamento do ambiente local para o Google Cloud na região `southamerica-east1` (São Paulo), com as adaptações de alta disponibilidade para produção. A empresa usa o Google Cloud, então esta é a nuvem alvo. Os números de capacidade e custo estão em [dimensionamento.md](dimensionamento.md) e [custos.md](custos.md), e a recuperação de desastres em [disaster-recovery.md](disaster-recovery.md). Nada aqui foi implantado: é desenho alvo, e não há infraestrutura como código do Google Cloud no repositório ([evolucoes.md](evolucoes.md)).
 
-## Diagrama
+**O que muda no código em relação ao ambiente local.** Quase nada, com uma exceção importante: em produção o broker é o **Pub/Sub**, e o código de hoje só tem o adaptador de RabbitMQ (AMQP). Criar o adaptador do Pub/Sub é trabalho de código, descrito no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). Todo o resto (PostgreSQL, Redis, OIDC, OTLP, Prometheus) são protocolos abertos e entram por configuração.
+
+## Decisão de plataforma: GKE Autopilot ou Cloud Run
+
+Três dos quatro componentes de aplicação são **processos contínuos**: o `lancamentos-relay` consulta o outbox a cada segundo, o consumidor do consolidado mantém uma assinatura aberta e controla quantas mensagens processa por vez, e o Keycloak mantém caches e sessões. O Cloud Run foi pensado para atender requisições, e fora delas a CPU é limitada, a menos que se configure a CPU sempre alocada com instâncias mínimas, que é pagar por instância ociosa. O escalonamento do Cloud Run também é por requisições simultâneas, e não pelo atraso da fila.
+
+| Critério | GKE Autopilot | Cloud Run |
+|---|---|---|
+| Relay (laço contínuo, sem requisição HTTP) | Natural: um pod comum com `/ready` | Exige CPU sempre alocada e instância mínima, ou o recurso de pools de trabalho (confirmar a disponibilidade geral na documentação) |
+| Consumidor com assinatura aberta e `prefetch` equivalente | Natural | Possível com CPU sempre alocada, mas o escalonamento não vê o atraso da fila |
+| API de lançamentos e de leitura (HTTP) | Boa. Escala por CPU ou por métrica | Muito boa. Escala a zero e por requisições |
+| Um só modelo de operação | Sim, para os quatro componentes | Não: dois modelos, ou o relay fica fora |
+| Identidade sem chave | Workload Identity Federation for GKE | Conta de serviço por serviço |
+| Custo ocioso | Cobra os recursos pedidos pelos pods | Escala a zero nas APIs |
+| Acesso privado ao Cloud SQL e ao Memorystore | Rede da própria VPC | Conector de VPC ou saída direta para a VPC |
+
+**Decisão: GKE Autopilot para os quatro componentes** (`lancamentos`, `lancamentos-relay`, `consolidado` com o consumidor e o Keycloak). O Autopilot elimina a gestão de nós (o Google cuida de patches, capacidade e segurança dos nós), cobra pelos recursos que os pods pedem e dá um único modelo de operação, probes e implantação. O Cloud Run continua sendo uma opção legítima **só para as APIs HTTP**; entraria se o custo ocioso virasse relevante, e o relay e o consumidor ficariam no GKE de qualquer forma. Esta decisão é uma escolha entre duas boas opções, e o argumento a favor do Autopilot é a simplicidade operacional para uma equipe pequena.
+
+O repositório de referência do mesmo autor para outro desafio escolheu o Cloud Run para o consolidado porque ali o consumo era acionado por eventos (push). Aqui o consumidor é uma assinatura de pull com controle de fluxo, que é o modelo do código atual, e o consolidado também serve a API de leitura no mesmo processo.
+
+## Diagrama de implantação
 
 ```mermaid
 graph TD
-    Internet --> WAF["AWS WAF<br/>conjunto gerenciado OWASP"]
-    WAF --> ALB["Application Load Balancer<br/>TLS, health check em /health"]
+    Internet --> LB["Cloud Load Balancing<br/>balanceador de aplicação externo<br/>TLS, health check em /ready"]
+    LB --- ARMOR["Cloud Armor<br/>regras OWASP e limite por IP"]
+    ARMOR --> GW["API Gateway (opcional)<br/>quota por cliente"]
+    GW --> GKE_L
 
-    ALB -->|"/lancamentos"| ECS_L["ECS Fargate<br/>lancamentos<br/>2 tarefas, 2 AZs"]
-    ALB -->|"/consolidado"| ECS_C["ECS Fargate<br/>consolidado + consumidor<br/>2 tarefas, 2 AZs"]
-    ALB -->|"/realms (token)"| KC["ECS Fargate<br/>Keycloak<br/>2 tarefas"]
+    subgraph REGIAO["southamerica-east1 (São Paulo), 3 zonas"]
+        subgraph GKE["GKE Autopilot regional, rede privada, Workload Identity"]
+            GKE_L["lancamentos<br/>2 pods"]
+            GKE_R["lancamentos-relay<br/>2 pods"]
+            GKE_C["consolidado + consumidor<br/>2 pods"]
+            KC["Keycloak<br/>2 pods"]
+        end
 
-    ECS_R["ECS Fargate<br/>lancamentos-relay<br/>2 tarefas"]
+        SQL_L[("Cloud SQL PostgreSQL<br/>HA regional, PITR<br/>lancamentos_db")]
+        SQL_C[("Cloud SQL PostgreSQL<br/>HA regional, PITR<br/>consolidado_db")]
+        REDIS[("Memorystore for Redis<br/>Standard, com réplica")]
+        PUBSUB["Pub/Sub<br/>tópico, assinatura, tópico de DLQ<br/>armazenamento só em southamerica-east1"]
 
-    ECS_L --> RDS_L[("RDS PostgreSQL 16<br/>Multi-AZ<br/>lancamentos_db")]
-    ECS_R --> RDS_L
-    ECS_C --> RDS_C[("RDS PostgreSQL 16<br/>Multi-AZ<br/>consolidado_db")]
-    KC --> RDS_L
+        SM["Secret Manager"]
+        KMS["Cloud KMS<br/>CMEK"]
+        AR["Artifact Registry"]
+    end
 
-    ECS_R -->|"publica eventos"| AMQ["Amazon MQ for RabbitMQ<br/>cluster de 3 nós, 3 AZs"]
-    AMQ -->|"entrega eventos"| ECS_C
+    GKE_L --> SQL_L
+    GKE_R --> SQL_L
+    KC --> SQL_L
+    GKE_C --> SQL_C
+    GKE_C --> REDIS
+    GKE_R -->|"publica, aguarda confirmação"| PUBSUB
+    PUBSUB -->|"entrega pelo menos uma vez"| GKE_C
 
-    ECS_C -->|"cache"| REDIS["ElastiCache Redis<br/>1 primário + 1 réplica"]
+    GKE_L -.->|"JWKS em cache"| KC
+    GKE_C -.->|"JWKS em cache"| KC
 
-    ECS_L -.->|"JWKS em cache"| KC
-    ECS_C -.->|"JWKS em cache"| KC
+    GKE_L -.-> SM
+    GKE_R -.-> SM
+    GKE_C -.-> SM
+    KMS -.->|"chaves dos dados"| SQL_L
+    KMS -.-> SQL_C
+    KMS -.-> PUBSUB
+    KMS -.-> SM
+    AR -.->|"imagens"| GKE
 
-    ECS_L --> SM["Secrets Manager"]
-    ECS_R --> SM
-    ECS_C --> SM
-    ECS_L --> CW["CloudWatch Logs e métricas"]
-    ECS_R --> CW
-    ECS_C --> CW
-    ECS_C --> XR["X-Ray via coletor OpenTelemetry"]
-    ECR["ECR"] -.->|"imagens"| ECS_L
+    GKE --> OBS["Cloud Monitoring, Logging e Trace<br/>Managed Service for Prometheus, OTLP"]
+    VPCSC["VPC Service Controls<br/>perímetro"] -.- REGIAO
 ```
 
 ```mermaid
 graph LR
-    subgraph VPC["VPC em sa-east-1"]
-        subgraph PUB["Sub-redes públicas, 2 AZs"]
-            ALB2["ALB"]
-            NAT["NAT Gateway por AZ"]
+    subgraph VPC["VPC em southamerica-east1"]
+        subgraph SUBNET["Sub-rede privada, intervalos secundários para pods e serviços"]
+            PODS["Pods do GKE Autopilot<br/>cluster privado"]
         end
-        subgraph PRIV["Sub-redes privadas, 2 AZs"]
-            TASKS["Tarefas ECS"]
-            DATA["RDS, ElastiCache, Amazon MQ"]
-        end
+        PSA["Acesso a serviços privados<br/>Cloud SQL e Memorystore por IP privado"]
+        PGA["Acesso privado do Google<br/>Pub/Sub, Secret Manager, Artifact Registry, Trace"]
     end
-    ALB2 --> TASKS
-    TASKS --> DATA
-    TASKS --> NAT
+    LBX["Balanceador externo"] --> PODS
+    PODS --> PSA
+    PODS --> PGA
+    IAP["IAP<br/>acesso administrativo"] -.-> PODS
 ```
 
-O Keycloak aparece como componente próprio porque é o que o código usa hoje. A alternativa gerenciada (Cognito) exige ajustes na validação do JWT e está comparada em [custos.md](custos.md).
+O Keycloak aparece como componente próprio porque é o que o código usa hoje. O **Identity Platform não substitui o Keycloak** neste caso: ele é voltado a usuários finais, e o consumo desta solução é de máquina a máquina (*client credentials*). Detalhes em [custos.md](custos.md) e no [ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
 
 ---
 
-## Mapeamento local para AWS
+## Mapeamento local para Google Cloud
 
-| Local | AWS | Notas |
+| Local | Google Cloud | Notas |
 |---|---|---|
-| `lancamentos` (contêiner) | ECS Fargate | Escala por contagem de tarefas |
-| `lancamentos-relay` (contêiner) | ECS Fargate | Várias réplicas são seguras por causa do `FOR UPDATE SKIP LOCKED` |
-| `consolidado` (contêiner) | ECS Fargate | API de leitura e consumidor no mesmo processo |
-| Keycloak (contêiner) | ECS Fargate | Modo de produção, com PostgreSQL e TLS |
-| PostgreSQL único com 2 bancos | **Dois RDS PostgreSQL 16 separados**, Multi-AZ | Local: dois bancos na mesma instância por simplicidade. Produção: instâncias separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md). O banco do Keycloak fica como um terceiro schema na instância de lançamentos |
-| RabbitMQ (single-node) | Amazon MQ for RabbitMQ, cluster de 3 nós | Quorum queues em 3 AZs. O tipo de instância de cluster, o menor listado em `sa-east-1`, é o `mq.m7g.medium`; o `mq.t3.micro` só existe como instância única ([custos.md](custos.md)) |
-| Redis (single-node) | ElastiCache Redis, 1 primário e 1 réplica | Failover automático. Cluster Mode com vários shards não é necessário a este volume |
-| Proxy local | ALB | Roteamento por caminho, TLS, health check em `/health` (ver nota abaixo) |
-| Prometheus e Grafana (profile) | CloudWatch e, opcionalmente, Prometheus gerenciado | As métricas `*_http_*`, de outbox e de lag continuam as mesmas |
-| Jaeger (profile) | X-Ray via coletor OpenTelemetry (ADOT) | O código já exporta OTLP; só muda o destino |
-| `.env` e segredos do compose | Secrets Manager | Referenciado nas definições de tarefa por `secrets:` |
-| Dockerfile | ECR | Registro privado, com varredura de vulnerabilidades. A imagem é multi-stage, roda como o usuário `node` e leva só o código compilado e as dependências de produção |
-| (sem equivalente) | API Gateway, opcional | Throttling por cliente e plano de uso, que tirariam do código o rate limit em memória |
+| `lancamentos` (contêiner) | GKE Autopilot | Escala por CPU com HPA |
+| `lancamentos-relay` (contêiner) | GKE Autopilot | Várias réplicas são seguras por causa do `FOR UPDATE SKIP LOCKED` |
+| `consolidado` (contêiner) | GKE Autopilot | API de leitura e consumidor no mesmo processo |
+| Keycloak (contêiner) | GKE Autopilot | Modo de produção, com PostgreSQL e TLS. O acesso ao console administrativo é pelo IAP, sem exposição pública |
+| PostgreSQL único com 2 bancos | **Duas instâncias Cloud SQL for PostgreSQL**, HA regional | Local: dois bancos na mesma instância por simplicidade. Produção: instâncias separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md). O banco do Keycloak fica como um terceiro banco na instância de lançamentos. Conexão por IP privado e pelo Cloud SQL Auth Proxy ou conector, com autenticação IAM quando possível |
+| RabbitMQ (single-node) | **Pub/Sub** | Tópico de eventos, assinatura do consolidado e tópico de mensagens mortas. Exige o adaptador descrito no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). O RabbitMQ continua no ambiente local e nos testes |
+| Redis (single-node) | Memorystore for Redis, nível Standard | Réplica em outra zona com failover automático. Cluster não é necessário a este volume |
+| Proxy local | Cloud Load Balancing (balanceador de aplicação externo) | Roteamento por caminho, TLS, health check em `/ready` (ver nota abaixo) |
+| (sem equivalente) | Cloud Armor | Regras OWASP pré-configuradas e limite por IP na borda |
+| (sem equivalente) | API Gateway (padrão) ou Apigee | Quota e throttling por cliente, que tirariam do código o rate limit em memória. Ver abaixo |
+| Prometheus e Grafana (profile) | Cloud Monitoring com Managed Service for Prometheus | As métricas `*_http_*`, de outbox e de lag continuam as mesmas, e as regras de `observability/alerts.yml` portam para regras gerenciadas |
+| Jaeger (profile) | Cloud Trace via OTLP | O código já exporta OTLP; só muda o destino |
+| `.env` e segredos do compose | Secret Manager | Montado pelo driver CSI do Secret Manager ou lido pela API com Workload Identity |
+| Chaves de criptografia | Cloud KMS com CMEK | Cloud SQL, Pub/Sub, Memorystore, Secret Manager e buckets |
+| Dockerfile | Artifact Registry | Registro privado com varredura de vulnerabilidades. A imagem é multi-stage, roda como o usuário `node` e leva só o código compilado e as dependências de produção |
+| Logs de auditoria | Cloud Audit Logs com bucket de retenção bloqueada | Ver [seguranca.md](seguranca.md) |
 
-> **Health check do ALB.** Pode usar `/ready`: o do consolidado depende só do PostgreSQL e da conexão com o broker, e o Redis, que é cache, fica de fora de propósito. Uma queda do cache não tira tarefas do balanceador (cenário C do [teste de resiliência](../tests/resiliencia/resiliencia.ps1)). `/health` serve como liveness do ECS.
+> **Health check do balanceador.** Pode usar `/ready`: o do consolidado depende só do PostgreSQL e da conexão com o broker, e o Redis, que é cache, fica de fora de propósito. Uma queda do cache não tira pods do balanceador (cenário C do [teste de resiliência](../tests/resiliencia/resiliencia.ps1)). `/health` serve como sonda de vivacidade do Kubernetes.
 
 > **Bancos separados.** Um VACUUM agressivo ou um pool esgotado numa instância não afeta a outra, as políticas de backup são independentes e a capacidade acompanha o perfil de cada uma: lançamentos é de escrita, consolidado é de leitura.
 
+### Cloud Armor, API Gateway e Apigee
+
+- **Cloud Armor** fica no balanceador e cobre o que é da borda: regras OWASP pré-configuradas e limite de taxa por IP. Ele **não** enxerga o claim do token, então não limita por cliente (`azp`).
+- Para **quota por cliente**, a escolha é entre dois produtos. O **API Gateway** é simples e barato e atende quota e validação de JWT; é o padrão desta proposta. O **Apigee** é uma plataforma de gestão de APIs (produtos de API, portal do desenvolvedor, análise, monetização) e só se justifica se houver muitos integradores externos que precisem de autoatendimento. A combinação do API Gateway com o balanceador e o Cloud Armor deve ser conferida na documentação antes de fechar o desenho.
+- Enquanto nenhum dos dois existir, o limite continua em memória por instância, o que está em [seguranca.md](seguranca.md) como limitação conhecida.
+
 ---
 
-## IAM: menor privilégio
+## Identidade e acesso: menor privilégio
 
-Cada serviço assume um papel de tarefa próprio, restrito aos segredos do próprio serviço.
+Cada serviço usa uma **conta de serviço do Google própria**, ligada à conta de serviço do Kubernetes por **Workload Identity Federation for GKE**. Não existe chave de conta de serviço baixada nem segredo de nuvem em variável de ambiente.
 
-```json
-{
-  "Effect": "Allow",
-  "Action": ["secretsmanager:GetSecretValue"],
-  "Resource": ["arn:aws:secretsmanager:sa-east-1:ACCOUNT:secret:caixa/lancamentos/*"]
-}
+| Serviço | Papéis (em nível de recurso, não de projeto) |
+|---|---|
+| `lancamentos` | acesso a segredos (`secretmanager.secretAccessor`) só dos segredos de lançamentos; cliente do Cloud SQL (`cloudsql.client`) da instância de lançamentos; escritor de métricas, logs e traces |
+| `lancamentos-relay` | idem, mais publicador (`pubsub.publisher`) só no tópico de eventos |
+| `consolidado` | segredos do consolidado; cliente do Cloud SQL do consolidado; assinante (`pubsub.subscriber`) só na assinatura do consolidado; publicador só no tópico de mensagens mortas |
+| `keycloak` | segredos do Keycloak; cliente do Cloud SQL |
+
+Exemplo de ligação (ilustrativo, nomes de exemplo):
+
+```
+gcloud iam service-accounts add-iam-policy-binding relay@PROJETO.iam.gserviceaccount.com \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:PROJETO.svc.id.goog[caixa/lancamentos-relay]"
 ```
 
-Nenhum serviço escreve em segredos nem acessa recursos do outro. A comunicação com RDS, Amazon MQ e Redis usa grupos de segurança com entrada restrita à porta e à origem exata:
+Nenhum serviço administra tópicos, assinaturas nem segredos: isso é feito pela infraestrutura como código. O código de hoje declara a fila em tempo de execução (`assertQueue`); o adaptador do Pub/Sub não deve fazer isso ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)).
 
-| Grupo de segurança | Entrada | Saída |
-|---|---|---|
-| `lancamentos` | ALB na porta 3001 | RDS lançamentos (5432), Keycloak (8080) para o JWKS |
-| `lancamentos-relay` | rede interna na porta 3003 (métricas e `/ready`) | RDS lançamentos (5432), Amazon MQ (5671) |
-| `consolidado` | ALB na porta 3002 | RDS consolidado (5432), Amazon MQ (5671), Redis (6379), Keycloak (8080) para o JWKS |
-| `keycloak` | ALB na porta 8080 | RDS (5432) |
+## Rede e perímetro
+
+- **Cluster privado**, sem IP público nos nós. O acesso aos serviços do Google é pelo acesso privado do Google; o Cloud SQL e o Memorystore são alcançados por IP privado (acesso a serviços privados).
+- **Saída para a internet:** nenhum componente precisa sair para a internet (o JWKS é interno e o Pub/Sub, o Secret Manager e o Artifact Registry são acessados de forma privada). Por isso o **Cloud NAT não está nos cenários de custo**. Ele entra só se algum componente passar a precisar de saída (por exemplo, envio de e-mail pelo Keycloak).
+- **VPC Service Controls:** um perímetro de serviço em torno de Cloud SQL, Pub/Sub, Secret Manager, Cloud KMS e Cloud Storage reduz o risco de exfiltração de dados por credencial comprometida. Exige planejar as exceções (por exemplo, o pipeline de implantação) e começar em modo de teste (*dry run*).
+- **Acesso administrativo:** IAP para o console do Keycloak e para o acesso aos recursos, sem bastion e sem SSH exposto.
+- **Políticas de rede** do Kubernetes entre namespaces: os pods de lançamentos não falam com o Redis, e os do consolidado não escrevem no banco de lançamentos.
 
 ---
 
 ## Escalabilidade e alta disponibilidade
 
 **Lançamentos (escrita):**
-- Escala automática por CPU (alvo de 60%), no mínimo 2 tarefas em 2 AZs.
-- O relay é um serviço à parte: N tarefas são N relays em paralelo, que dividem o trabalho com `SKIP LOCKED` sem duplicar eventos.
-- RDS Multi-AZ com failover automático.
+- HPA por CPU (alvo de 60%), no mínimo 2 pods em zonas diferentes.
+- O relay é um serviço à parte: N pods são N relays em paralelo, que dividem o trabalho com `SKIP LOCKED` sem duplicar eventos.
+- Cloud SQL com HA regional (réplica síncrona em outra zona e failover automático).
 
 **Consolidado (leitura):**
-- Escala por CPU e por requisições por alvo, no mínimo 2 tarefas.
-- O cache Redis absorve a leitura repetida; com falha do cache a leitura cai para o banco.
-- `prefetch=1` por consumidor: N tarefas são N mensagens em processamento paralelo, sem coordenação.
+- Escala por CPU e, para o consumidor, pelo atraso da assinatura (métrica do Pub/Sub exposta ao HPA), no mínimo 2 pods.
+- O Redis absorve a leitura repetida; com falha do cache a leitura cai para o banco.
+- O controle de fluxo da assinatura em 1 mensagem por vez equivale ao `prefetch=1` de hoje: N pods são N mensagens em processamento, sem coordenação.
 
-**RabbitMQ:**
-- Amazon MQ com 3 nós em 3 AZs e quorum queues. As mensagens persistem enquanto a maioria dos nós (2 de 3) estiver de pé.
-- A DLQ `consolidado.lancamentos.dlq` é durável. O reprocessamento é manual hoje ([disaster-recovery.md](disaster-recovery.md)).
+**Pub/Sub:**
+- Serviço regional gerenciado, com as mensagens replicadas entre zonas. A retenção da assinatura e do tópico guarda as mensagens enquanto o consolidado está fora.
+- A assinatura tem política de mensagens mortas. O reprocessamento é manual hoje ([disaster-recovery.md](disaster-recovery.md)).
 
 ---
 
 ## Equivalência em outras nuvens
 
-A solução fala protocolos abertos (HTTP, OIDC, PostgreSQL, AMQP 0-9-1, protocolo do Redis, OTLP) e roda em contêineres comuns. **Nenhum componente do código depende de um serviço proprietário da AWS**: os serviços da tabela de mapeamento acima são a forma gerenciada de rodar o mesmo software, e trocá-los é questão de configuração e de operação, não de código. A tabela abaixo é só uma equivalência de componentes; não há estimativa de custo para estas nuvens.
+A solução fala protocolos abertos (HTTP, OIDC, PostgreSQL, AMQP 0-9-1 no ambiente local, protocolo do Redis, OTLP) e roda em contêineres comuns. **Nenhum componente do código depende de um serviço proprietário de uma nuvem específica**, exceto o adaptador do broker, que é a única parte a escrever para cada nuvem. A tabela abaixo é só uma equivalência de componentes; não há estimativa de custo para as outras duas nuvens.
 
-| Componente | AWS (este documento) | Azure | Google Cloud |
+| Componente | Google Cloud (este documento) | AWS | Azure |
 |---|---|---|---|
-| Computação de contêineres | ECS Fargate | Azure Container Apps (ou AKS) | Cloud Run (ou GKE Autopilot) |
-| PostgreSQL gerenciado | RDS for PostgreSQL | Azure Database for PostgreSQL, servidor flexível | Cloud SQL for PostgreSQL |
-| Broker de mensagens | Amazon MQ for RabbitMQ | Sem RabbitMQ gerenciado de primeira parte: RabbitMQ próprio em AKS ou VM. O Service Bus fala AMQP 1.0, não o 0-9-1 do código, então exigiria trocar o cliente | Sem RabbitMQ gerenciado de primeira parte: RabbitMQ próprio em GKE ou VM. O Pub/Sub não fala AMQP, então exigiria reescrever o relay e o consumidor |
-| Redis | ElastiCache | Azure Cache for Redis (ou Azure Managed Redis) | Memorystore for Redis |
-| Identidade (OIDC) | Keycloak em contêiner (ou Cognito, com ajustes) | Keycloak em contêiner (ou Microsoft Entra ID, com ajustes de claims e escopos) | Keycloak em contêiner (ou Identity Platform, com ajustes) |
-| Segredos | Secrets Manager | Key Vault | Secret Manager |
-| Observabilidade | CloudWatch e X-Ray (via coletor OpenTelemetry) | Azure Monitor e Application Insights (OTLP) | Cloud Monitoring, Cloud Logging e Cloud Trace (OTLP) |
+| Computação de contêineres | GKE Autopilot (ou Cloud Run para as APIs) | ECS Fargate | Azure Container Apps (ou AKS) |
+| PostgreSQL gerenciado | Cloud SQL for PostgreSQL, HA regional | RDS for PostgreSQL, Multi-AZ | Azure Database for PostgreSQL, servidor flexível |
+| Broker de mensagens | Pub/Sub (produção) | Amazon MQ for RabbitMQ (mesmo protocolo do código) ou SNS e SQS (exige adaptador) | Sem RabbitMQ gerenciado de primeira parte: RabbitMQ próprio em AKS ou VM. O Service Bus fala AMQP 1.0, não o 0-9-1 do código, então exigiria adaptador |
+| Redis | Memorystore for Redis | ElastiCache | Azure Cache for Redis (ou Azure Managed Redis) |
+| Identidade (OIDC) | Keycloak em contêiner. O Identity Platform é para usuários finais | Keycloak em contêiner (ou Cognito, com ajustes de claims) | Keycloak em contêiner (ou Microsoft Entra ID, com ajustes de claims e escopos) |
+| Segredos | Secret Manager | Secrets Manager | Key Vault |
+| Chaves de criptografia | Cloud KMS (CMEK) | KMS | Key Vault ou Managed HSM |
+| Borda e WAF | Cloud Load Balancing com Cloud Armor | ALB com WAF | Application Gateway com WAF ou Front Door |
+| Observabilidade | Cloud Monitoring, Logging e Trace (OTLP e Prometheus gerenciado) | CloudWatch e X-Ray (via coletor OpenTelemetry) | Azure Monitor e Application Insights (OTLP) |
+| Auditoria | Cloud Audit Logs com bucket de retenção bloqueada | CloudTrail com bucket S3 Object Lock | Activity Log com armazenamento imutável |
 
-O ponto de atenção é o broker: nas três nuvens a opção sem alterar código é o RabbitMQ, gerenciado na AWS e operado pela equipe nas outras duas. A troca por um serviço nativo de fila (SQS e SNS, Service Bus, Pub/Sub) está discutida no [ADR-003](adrs/ADR-003-rabbitmq-vs-kafka-vs-sqs.md) e mexe no relay e no consumidor. As equivalências de identidade que não são o Keycloak mudam a forma dos claims e dos escopos, como descrito no [ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
+O ponto de atenção é o broker: nas três nuvens a opção sem alterar código é o RabbitMQ, que só tem versão gerenciada de primeira parte em uma delas (ver a tabela acima) e seria operado pela equipe nas outras duas. A troca por um serviço nativo (Pub/Sub, SNS e SQS, Service Bus) mexe no relay e no consumidor e está discutida no [ADR-003](adrs/ADR-003-rabbitmq-vs-kafka-vs-pubsub.md) e no [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md). As equivalências de identidade que não são o Keycloak mudam a forma dos claims e dos escopos, como descrito no [ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md).
 
 ---
 

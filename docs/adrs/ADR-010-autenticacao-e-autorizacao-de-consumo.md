@@ -35,11 +35,14 @@ Simples, mas sem expiração padronizada, sem escopos, sem audiência e com revo
 ### Somente mTLS
 Dá identidade forte ao cliente, mas não expressa escopos nem o vínculo com o comerciante. Fica como **complemento** (autenticação do cliente por certificado, RFC 8705) para integradores sensíveis, não como substituto.
 
-### Validar só no gateway (ALB, API Gateway)
+### Validar só no gateway (balanceador, API Gateway)
 Útil na borda, mas deixaria os serviços confiando cegamente em qualquer chamada que chegue à rede interna. A validação nos serviços é a defesa em profundidade; o gateway pode repetir a checagem.
 
-### Amazon Cognito
-É a opção natural na AWS e fala OIDC, mas a troca **não é só configuração** (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`). Segundo a documentação da AWS, o token de credencial de cliente do Cognito traz `client_id` e `scope` em vez de `aud`, o nome dos escopos inclui o identificador do servidor de recursos, e o claim `comerciante_id` exigiria um gatilho de geração de token. A validação em `auth.ts` precisaria aceitar esses formatos. Confirmar na documentação do Cognito antes de decidir; a estimativa de custo está em [custos.md](../custos.md).
+### Identity Platform do Google Cloud
+É o serviço de identidade gerenciado do Google Cloud e fala OIDC, mas é voltado à autenticação de **usuários finais**. O consumo desta solução é de máquina a máquina, pelo fluxo *client credentials*, e eu **não confirmei** que o produto o ofereça; se não oferecer, ele não substitui o Keycloak aqui. Mesmo que oferecesse, a troca **não seria só configuração** (`OIDC_ISSUER`, `OIDC_JWKS_URI`, `OIDC_AUDIENCE`): os claims e os nomes dos escopos mudam, e o claim `comerciante_id` exigiria um mecanismo de geração de token. A validação em `auth.ts` precisaria aceitar esses formatos. Confirmar na documentação do produto antes de decidir diferente; a comparação de custo está em [custos.md](../custos.md).
+
+### Tokens de identidade de contas de serviço do Google
+Para chamadas entre serviços dentro do próprio Google Cloud, uma conta de serviço pode obter um token OIDC assinado pelo Google, validável por JWKS, sem Keycloak. Não carrega o `comerciante_id` nem escopos de negócio, então o vínculo entre o cliente e o comerciante ficaria em configuração dos serviços, e não serve a integradores externos (ERPs de comerciantes). **Descartado** para o consumo externo; fica como opção para chamadas internas futuras.
 
 ### Introspecção de token a cada requisição
 Permitiria revogação imediata, ao custo de uma chamada ao provedor por requisição e de acoplar a disponibilidade das APIs ao Keycloak. Com a validação local por JWKS, o Keycloak pode cair sem derrubar quem já tem token. **Descartado.**

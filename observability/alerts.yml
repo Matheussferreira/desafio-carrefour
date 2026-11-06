@@ -1,5 +1,5 @@
 # Regras de alerta do Prometheus. Elas são avaliadas aqui e aparecem em http://localhost:9090/alerts.
-# O envio para uma pessoa (Alertmanager, CloudWatch, e-mail) não está configurado: ver docs/evolucoes.md.
+# O envio para uma pessoa (Alertmanager, Cloud Monitoring, e-mail) não está configurado: ver docs/evolucoes.md.
 groups:
   - name: fluxo-de-caixa
     rules:

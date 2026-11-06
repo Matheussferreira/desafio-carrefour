@@ -1,153 +1,168 @@
 # Estimativa de custos de infraestrutura e licenças
 
-Todos os valores são **estimativas**, em dólares americanos, para a região `sa-east-1` (São Paulo), calculadas sobre a lista de preços pública da AWS consultada em **2026-11-05**. Nada aqui foi cobrado nem medido numa conta real. A memória de cálculo está nas tabelas, para que qualquer número possa ser refeito.
+Todos os valores são **estimativas**, em dólares americanos, para o Google Cloud na região `southamerica-east1` (São Paulo), consultadas em **2026-11-05**. Nada aqui foi cobrado nem medido numa conta real. O que não pôde ser confirmado em fonte oficial aparece como **faixa**, com a regra abaixo, e precisa ser validado na calculadora antes de qualquer compromisso de orçamento.
 
 ## Fonte e como validar
 
-Os preços unitários vêm da API pública de lista de preços da AWS (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<serviço>/current/sa-east-1/index.json`), nas versões abaixo. Preços da AWS mudam; antes de qualquer decisão, **refaça a conta na [AWS Pricing Calculator](https://calculator.aws/)** com a região `South America (São Paulo)` e anote a data da validação ao lado do resultado.
+A calculadora oficial é o [Google Cloud Pricing Calculator](https://cloud.google.com/products/calculator). Escolha a região `southamerica-east1` e refaça as tabelas abaixo; anote a data da validação ao lado do resultado. **Validação na calculadora: não realizada.**
 
-| Serviço | Versão da lista de preços consultada |
-|---|---|
-| Amazon MQ | 20260911124456 |
-| ECS (Fargate) | 20261019224317 |
-| ElastiCache | 20261028192450 |
-| RDS | 20261029070635 |
-| Elastic Load Balancing | 20261102102527 |
-| CloudWatch | 20261104213532 |
-| Secrets Manager, ECR | 20260911 |
-| EC2 (NAT Gateway, instâncias, EBS, transferência regional) | 20261105162628 |
-| Cognito | 20261020233814 |
-| X-Ray | 20260911124622 |
+Como foi a consulta: as páginas de preço do Google são montadas por JavaScript e o catálogo de preços por API exige chave, então os valores vieram do **texto das páginas oficiais obtido por busca** e, no caso do Cloud SQL, de um **agregador de terceiros**. Por isso cada linha leva uma classificação:
 
-Validação na calculadora oficial: **não realizada**. Os valores acima vêm só da lista de preços pública; refaça a conta na calculadora antes de qualquer compromisso de orçamento.
+| Classe | Significado | Como entra na tabela |
+|---|---|---|
+| **O** | Preço oficial, igual em todas as regiões (confirmado em texto da página do produto) | Valor único |
+| **R** | Preço oficial, mas a região da tabela consultada não foi confirmada como São Paulo | De 1,0 a 1,6 vezes o valor de referência. O fator de 1,6 é uma **hipótese** de prêmio regional, a validar |
+| **T** | Dado de terceiros para São Paulo (não oficial, sem data) | De 1,0 a 1,25 vezes o valor de referência |
+| **H** | Hipótese sem fonte | Faixa informada na linha |
+
+| Item | Referência usada | Fonte | Classe |
+|---|---|---|---|
+| Pub/Sub | US$ 40 por TiB; 10 GiB gratuitos por mês, por conta de faturamento; o preço é o mesmo em todas as regiões | [cloud.google.com/pubsub/pricing](https://cloud.google.com/pubsub/pricing) | O |
+| Secret Manager | US$ 0,06 por versão ativa por mês (6 gratuitas); US$ 0,03 por 10 mil acessos (10 mil gratuitos) | [cloud.google.com/secret-manager/pricing](https://cloud.google.com/secret-manager/pricing) | O |
+| Cloud KMS | US$ 0,06 por versão de chave de software por mês; US$ 0,03 por 10 mil operações | [cloud.google.com/kms/pricing](https://cloud.google.com/kms/pricing) | O |
+| Cloud Armor Standard | US$ 5 por política por mês; US$ 1 por regra por mês; US$ 0,75 por milhão de requisições (política global); regras gerenciadas somam US$ 0,75 por milhão avaliado | [cloud.google.com/armor/pricing](https://cloud.google.com/armor/pricing) | O |
+| Cloud Logging | US$ 0,50 por GiB ingerido (50 GiB gratuitos por projeto por mês); retenção acima de 30 dias a US$ 0,01 por GiB por mês | [cloud.google.com/products/observability/pricing](https://cloud.google.com/products/observability/pricing) | O |
+| Managed Service for Prometheus | US$ 0,06 por milhão de amostras (faixa de 0 a 50 bilhões) | idem | O |
+| Cloud Trace | US$ 0,20 por milhão de spans; 2,5 milhões gratuitos por conta de faturamento | idem | O |
+| Balanceador, regras de encaminhamento | US$ 0,025 por hora para as 5 primeiras regras | [cloud.google.com/load-balancing/pricing](https://cloud.google.com/load-balancing/pricing) | O |
+| Balanceador, dados processados | US$ 0,008 a 0,012 por GB conforme a região | idem | faixa |
+| GKE Autopilot | US$ 0,0445 por vCPU-hora e US$ 0,0049225 por GiB-hora (perfil de uso geral, pods sob demanda) | [cloud.google.com/kubernetes-engine/pricing](https://cloud.google.com/kubernetes-engine/pricing) | R |
+| Memorystore for Redis, Standard M1 | US$ 0,064 por GiB-hora | [cloud.google.com/memorystore/docs/redis/pricing](https://cloud.google.com/memorystore/docs/redis/pricing) | R |
+| Cloud SQL for PostgreSQL, Enterprise, São Paulo | US$ 74 por mês para 1 vCPU e 3,75 GB, US$ 148 para 2 vCPU e 7,5 GB, só computação, sob demanda, instância única | [bytebase.com/dbcost](https://www.bytebase.com/dbcost/cloudsql/instance/db-standard-2/) (terceiros) | T |
+
+A alta disponibilidade regional do Cloud SQL **dobra** o custo de computação e de armazenamento da instância (uma instância principal e uma em espera em outra zona). Confirme essa regra na página de preços do Cloud SQL.
 
 ## Premissas
 
-- Volume: pico de 50 req/s no consolidado (requisito), cerca de 1 milhão de requisições por dia e 100 mil lançamentos por dia (premissa de dimensionamento, não medida).
-- 730 horas por mês, preço sob demanda, sem Reserved Instances nem Savings Plans (não há preço confirmado nesta consulta para esses modelos, então não calculo desconto).
-- Dois bancos PostgreSQL em instâncias RDS separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md).
-- Quatro componentes de aplicação em ECS Fargate: `lancamentos`, `lancamentos-relay`, `consolidado` e o provedor de identidade (Keycloak, ver a comparação com o Cognito mais adiante).
-- O tamanho de cada tarefa Fargate é uma **hipótese**. A capacidade medida do consolidado (cerca de 197 a 199 req/s numa instância, em máquina de desenvolvimento, ver [testes.md](testes.md)) não foi medida em Fargate, então o dimensionamento da seção de produção deve ser validado com o k6 numa conta real.
+- Volume: pico de 50 req/s no consolidado (requisito), cerca de 1 milhão de requisições por dia (30 milhões por mês) e 100 mil lançamentos por dia (3 milhões de eventos por mês). São premissas de dimensionamento, não medidas.
+- 730 horas por mês, preço sob demanda, sem desconto por uso comprometido (ver a seção de otimizações).
+- Dois bancos PostgreSQL em instâncias Cloud SQL separadas, como pede o [ADR-004](adrs/ADR-004-banco-por-servico.md).
+- Quatro componentes de aplicação em GKE Autopilot: `lancamentos`, `lancamentos-relay`, `consolidado` (com o consumidor) e o Keycloak. O tamanho de cada pod é uma **hipótese**; a capacidade medida do consolidado (cerca de 197 a 199 req/s numa instância, em máquina de desenvolvimento, [testes.md](testes.md)) não foi medida no GKE.
+- Broker: Pub/Sub ([ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md)), cerca de 3 milhões de mensagens por mês de menos de 1 KB.
+- Cloud NAT fora da conta: nenhum componente precisa de saída para a internet ([arquitetura-alvo-cloud.md](arquitetura-alvo-cloud.md)).
+- Moeda: dólar. Não incluo impostos, suporte do Google, câmbio nem horas de operação da equipe.
 
 ## Licenças
 
-**Zero.** PostgreSQL, RabbitMQ, Redis, Node.js, Keycloak, Prometheus, Grafana, Jaeger e k6 são software livre. No RDS, no Amazon MQ e no ElastiCache a licença do motor está embutida no preço do serviço, sem cobrança separada. A única licença paga a considerar seria a de ferramentas comerciais de observabilidade ou de WAF de terceiros, que esta solução não usa.
+**Zero.** PostgreSQL, Redis, RabbitMQ, Node.js, Keycloak, Prometheus, Grafana, Jaeger e k6 são software livre. No Cloud SQL e no Memorystore a licença do motor está embutida no preço do serviço. O Cloud SQL tem as edições Enterprise e Enterprise Plus, com preços diferentes; esta estimativa usa a Enterprise. A única licença paga a considerar seria a de ferramentas comerciais de observabilidade ou de WAF de terceiros, que esta solução não usa.
 
 ## Cenário A: mínimo viável (um ambiente enxuto, sem alta disponibilidade)
 
-Serve para homologação ou para uma operação pequena que aceita parada. **Não atende produção de um banco**: o broker é instância única, os bancos não são Multi-AZ e há uma tarefa de cada serviço.
+Serve para homologação ou para uma operação pequena que aceita parada. **Não atende produção de um banco**: os bancos são de zona única, o Redis é do nível Basic e há um pod de cada serviço.
 
-| Item | Especificação | Cálculo | US$/mês |
+| Item | Cl. | US$/mês | Cálculo |
 |---|---|---|---|
-| Fargate `lancamentos` | 1 tarefa, 0,25 vCPU, 0,5 GB | (0,25 x 0,0696 + 0,5 x 0,0076) x 730 | 15,48 |
-| Fargate `lancamentos-relay` | 1 tarefa, 0,25 vCPU, 0,5 GB | idem | 15,48 |
-| Fargate `consolidado` | 1 tarefa, 0,5 vCPU, 1 GB | (0,5 x 0,0696 + 1 x 0,0076) x 730 | 30,95 |
-| Fargate Keycloak | 1 tarefa, 1 vCPU, 2 GB | (1 x 0,0696 + 2 x 0,0076) x 730 | 61,90 |
-| RDS `lancamentos_db` | `db.t4g.small`, Single-AZ, 20 GB gp3 | 0,069 x 730 + 20 x 0,219 | 54,75 |
-| RDS `consolidado_db` | `db.t4g.small`, Single-AZ, 20 GB gp3 | idem | 54,75 |
-| Amazon MQ for RabbitMQ | `mq.t3.micro`, instância única | 0,04368 x 730 | 31,89 |
-| ElastiCache Redis | `cache.t4g.micro`, 1 nó | 0,030 x 730 | 21,90 |
-| ALB | 1 balanceador, 1 LCU médio | 0,034 x 730 + 0,011 x 730 | 32,85 |
-| NAT Gateway | 1 gateway, 50 GB processados | 0,093 x 730 + 50 x 0,093 | 72,54 |
-| CloudWatch Logs | 10 GB ingeridos, 10 GB armazenados | 10 x 0,90 + 10 x 0,0408 | 9,41 |
-| Secrets Manager | 5 segredos | 5 x 0,40 | 2,00 |
-| ECR | 1 GB | 1 x 0,10 | 0,10 |
-| Transferência para a internet | 50 GB (limite superior, sem franquia gratuita) | 50 x 0,15 | 7,50 |
-| **Total estimado** | | | **cerca de 411** |
-
-Faixa conforme as premissas variáveis (LCU de 1 a 3, 20 a 100 GB no NAT, 5 a 20 GB de logs, 0 a 100 GB de saída): **US$ 396 a 449 por mês**.
+| GKE Autopilot, 4 pods (2,0 vCPU e 4 GiB no total) | R | 79,34 a 126,95 | (2,0 x 0,0445 + 4 x 0,0049225) x 730 |
+| Cloud SQL, 2 x `db-custom-1-3840`, zona única | T | 148,00 a 185,00 | 2 x 74 |
+| Cloud SQL, SSD de 2 x 20 GB | H | 6,80 a 14,00 | 40 GB x 0,17 a 0,35 |
+| Cloud SQL, backups de 40 GB | H | 3,20 a 8,00 | 40 GB x 0,08 a 0,20 |
+| Memorystore Redis Basic, 1 GiB | H | 23,36 a 74,75 | 0,5 a 1,6 x (0,064 x 730) |
+| Balanceador, 1 regra de encaminhamento | O | 18,25 | 0,025 x 730 |
+| Balanceador, 50 GB processados | faixa | 0,40 a 0,60 | 50 x 0,008 a 0,012 |
+| Cloud Armor Standard, 1 política, 3 regras, 30 M de requisições | O | 30,50 | 5 + 3 x 1 + 30 x 0,75 |
+| Saída para a internet, 50 GB | H | 6,00 a 11,50 | 50 x 0,12 a 0,23 |
+| Managed Prometheus, 1.000 séries a cada 15 s | O | 10,37 | 1.000 x 172.800 amostras x 0,06 por milhão |
+| Pub/Sub, cerca de 6 GiB de vazão | O | 0,00 | dentro dos 10 GiB gratuitos |
+| Secret Manager, 5 versões ativas | O | 0,00 | abaixo das 6 gratuitas |
+| Cloud Logging, 10 GiB | O | 0,00 | abaixo dos 50 GiB gratuitos |
+| Artifact Registry, 1 GB | H | 0,05 a 0,25 | hipótese |
+| **Total estimado** | | **cerca de 326 a 480** (ponto médio 403) | |
 
 Observações do cenário A:
-- O `mq.t3.micro` só existe como instância única (a lista de preços não traz esse tamanho para cluster). A AWS o destina a avaliação e desenvolvimento. O armazenamento do broker não está no total: a lista traz o armazenamento do RabbitMQ a US$ 0,19 por GB-mês (single) e o volume efetivamente alocado deve ser confirmado na calculadora.
-- Para economizar o NAT Gateway (cerca de US$ 68 por mês), as tarefas poderiam rodar em sub-redes públicas com IP público e grupos de segurança restritivos. Não recomendo para um banco; fica registrado como opção.
+- A faixa larga vem sobretudo do GKE Autopilot e do Memorystore (classes R e H) e do Cloud SQL (classe T). O limite inferior usa o valor de referência sem prêmio regional, e o superior supõe o prêmio de 1,6 vez, que é hipótese.
+- O Redis do nível Basic não tem réplica nem failover. O preço do Basic não foi confirmado; a faixa o coloca entre metade do Standard e o Standard com o prêmio regional.
+- O Pub/Sub custa zero porque cerca de 3 milhões de mensagens por mês de menos de 1 KB ficam em alguns GiB (publicação e entrega), abaixo da franquia gratuita de 10 GiB por mês por conta de faturamento. A franquia é compartilhada com outros projetos da mesma conta.
 
-## Cenário B: produção Multi-AZ
+## Cenário B: produção com alta disponibilidade
 
-Duas zonas de disponibilidade, duas ou mais tarefas por serviço, bancos Multi-AZ, broker em cluster.
+Três zonas na região, dois ou mais pods por serviço, bancos com HA regional, Redis Standard, criptografia com chaves próprias (CMEK) e trilha de auditoria.
 
-| Item | Especificação | Cálculo | US$/mês |
+| Item | Cl. | US$/mês | Cálculo |
 |---|---|---|---|
-| Fargate `lancamentos` | 2 tarefas, 0,5 vCPU, 1 GB | 2 x 30,95 | 61,90 |
-| Fargate `lancamentos-relay` | 2 tarefas, 0,25 vCPU, 0,5 GB | 2 x 15,48 | 30,95 |
-| Fargate `consolidado` | 2 tarefas, 0,5 vCPU, 1 GB | 2 x 30,95 | 61,90 |
-| Fargate Keycloak | 2 tarefas, 1 vCPU, 2 GB | 2 x 61,90 | 123,81 |
-| RDS `lancamentos_db` | `db.t4g.medium`, Multi-AZ, 50 GB gp3 | 0,275 x 730 + 50 x 0,438 | 222,65 |
-| RDS `consolidado_db` | `db.t4g.medium`, Multi-AZ, 50 GB gp3 | idem | 222,65 |
-| Amazon MQ for RabbitMQ | **cluster de 3 nós**, `mq.m7g.medium` | 0,6533 x 730 | 476,91 |
-| ElastiCache Redis | `cache.t4g.small`, 1 primário + 1 réplica em AZs distintas | 2 x 0,061 x 730 | 89,06 |
-| ALB | 1 balanceador, 2 LCU médios | 0,034 x 730 + 2 x 0,011 x 730 | 40,88 |
-| NAT Gateway | 2 gateways (um por AZ), 100 GB processados | 2 x 0,093 x 730 + 100 x 0,093 | 145,08 |
-| CloudWatch | 30 GB de logs, 100 métricas customizadas, 15 alarmes | 30 x 0,90 + 30 x 0,0408 + 100 x 0,30 + 15 x 0,135 | 60,25 |
-| X-Ray | 5% de amostragem: cerca de 1,5 milhão de traces por mês, 100 mil gratuitos | (1,5 milhão - 100 mil) x 0,000005 | 7,00 |
-| Secrets Manager | 8 segredos | 8 x 0,40 | 3,20 |
-| ECR | 2 GB | 2 x 0,10 | 0,20 |
-| Transferência para a internet | 100 GB (limite superior) | 100 x 0,15 | 15,00 |
-| Transferência entre AZs | 200 GB, cobrada nos dois sentidos | 200 x 0,01 x 2 | 4,00 |
-| **Total estimado** | | | **cerca de 1.565** |
+| GKE Autopilot, 8 pods (4,5 vCPU e 9 GiB no total) | R | 178,52 a 285,64 | (4,5 x 0,0445 + 9 x 0,0049225) x 730 |
+| Cloud SQL, 2 x `db-custom-2-7680`, HA regional | T | 592,00 a 740,00 | 2 bancos x 2 (HA) x 148 |
+| Cloud SQL, SSD de 2 x 50 GB, dobrado pela HA | H | 34,00 a 70,00 | 200 GB x 0,17 a 0,35 |
+| Cloud SQL, backups e PITR, 100 GB | H | 8,00 a 20,00 | 100 GB x 0,08 a 0,20 |
+| Memorystore Redis Standard, 1 GiB | R | 46,72 a 74,75 | 0,064 x 730 |
+| Balanceador, 1 regra de encaminhamento | O | 18,25 | 0,025 x 730 |
+| Balanceador, 200 GB processados | faixa | 1,60 a 2,40 | 200 x 0,008 a 0,012 |
+| Cloud Armor Standard, 1 política, 6 regras, 30 M de requisições e regras gerenciadas | O | 56,00 | 5 + 6 x 1 + 30 x 0,75 + 30 x 0,75 |
+| Saída para a internet, 100 GB | H | 12,00 a 23,00 | 100 x 0,12 a 0,23 |
+| Cloud KMS (CMEK), 6 chaves e 1 milhão de operações | O | 3,36 | 6 x 0,06 + 100 x 0,03 |
+| Secret Manager, 16 versões ativas | O | 0,60 | (16 - 6) x 0,06 |
+| Cloud Logging, 60 GiB com retenção de 90 dias | O | 6,20 | (60 - 50) x 0,50 + 60 x 2 x 0,01 |
+| Managed Prometheus, 1.500 séries a cada 15 s | O | 15,55 | 1.500 x 172.800 amostras x 0,06 por milhão |
+| Cloud Trace, 5% de amostragem e 18 spans por trace | O | 4,90 | (27 milhões - 2,5 milhões) x 0,20 por milhão |
+| Pub/Sub, cerca de 6 GiB de vazão | O | 0,00 | dentro da franquia; a 10 vezes o volume seria cerca de 1,95 |
+| Cloud Storage, logs de auditoria com retenção bloqueada, 100 GB | H | 2,00 a 5,00 | 100 GB x 0,02 a 0,05 |
+| Artifact Registry, 2 GB | H | 0,10 a 0,35 | hipótese |
+| **Total estimado** | | **cerca de 980 a 1.326** (ponto médio 1.153) | |
 
-Faixa conforme as premissas variáveis (1 a 5 LCU, 50 a 300 GB no NAT, 15 a 60 GB de logs, 0 a 300 GB de saída): **US$ 1.522 a 1.674 por mês**.
-
-### Por que o Amazon MQ domina o custo
-
-Um erro fácil de cometer é dimensionar o cluster de 3 nós com `mq.t3.micro`. Na lista de preços de `sa-east-1` o `mq.t3.micro` aparece apenas como instância única de RabbitMQ; as entradas de cluster de 3 nós (Multi-AZ) existem para a família `m5` e para a `m7g`. O menor tamanho de cluster listado é o `mq.m7g.medium`, e é ele que o cenário B usa.
-
-| Tamanho | Instância única (US$/h) | Cluster de 3 nós (US$/h) | Cluster, US$/mês |
-|---|---|---|---|
-| `mq.t3.micro` | 0,04368 | não listado | n/a |
-| `mq.m7g.medium` | 0,2178 | 0,6533 | 476,91 |
-| `mq.m7g.large` | 0,4358 | 1,3075 | 954,48 |
-| `mq.m5.large` | 0,459 | 1,377 | 1.005,21 |
-
-O preço de cluster listado é exatamente três vezes o da instância única, o que indica que ele já cobre os três nós; confirme essa leitura na calculadora, porque, se o preço for por nó, o custo do broker triplica (cerca de US$ 1.430 por mês) e o total do cenário B sobe na mesma proporção. Os tamanhos e os preços de cluster **devem ser conferidos** na calculadora e na [documentação de tipos de instância do Amazon MQ for RabbitMQ](https://docs.aws.amazon.com/amazon-mq/latest/developer-guide/rmq-broker-instance-types.html), porque a AWS pode mudar a família suportada.
+Observações do cenário B:
+- O **Cloud SQL domina o custo** (cerca de 65% do total: 634 de 980 no limite inferior, 830 de 1.326 no superior). É a consequência de ter dois bancos com HA regional, como pede o ADR-004. O broker, que na alternativa com RabbitMQ gerenciado seria o maior item, aqui é praticamente zero.
+- Os 18 spans por trace foram medidos num `POST /lancamentos` que atravessa API, relay e consolidado (ver [observabilidade.md](observabilidade.md)). A amostragem de 5% é premissa.
+- As 1.000 e 1.500 séries do Prometheus são **hipóteses de volume**; o número real depende dos rótulos das métricas. O preço por amostra é oficial.
+- O Cloud Armor com regras gerenciadas (WAF pré-configurado) cobra por requisição avaliada, o que dobra a parcela por requisição.
 
 ## Itens sem preço confirmado, fora dos totais
 
-Não consegui confirmar preço para estes itens nesta consulta, então **não entram nos totais** e precisam ser levantados na calculadora antes de qualquer proposta:
+Não consegui confirmar preço para estes itens, então **não entram nos totais** e precisam ser levantados na calculadora antes de qualquer proposta:
 
 | Item | Quando entra | O que fazer |
 |---|---|---|
-| AWS WAF (conjunto gerenciado OWASP, regras por taxa) | Borda pública, recomendado em [seguranca.md](seguranca.md) | Calcular na calculadora por ACL, regras e requisições |
-| API Gateway HTTP API | Opcional, se o throttling por cliente ficar no gateway | A lista traz US$ 1,59 por milhão de requisições (primeiros 300 milhões); com 30 milhões de requisições por mês seria cerca de US$ 47,70 |
-| AWS KMS (chaves gerenciadas pelo cliente) | Criptografia em repouso com chave própria | Calcular por chave e por requisição |
-| Backups do RDS acima do tamanho provisionado e cópia entre regiões | Plano de DR ([disaster-recovery.md](disaster-recovery.md)) | Calcular pelo volume de backup e pela região de destino |
-| Armazenamento do Amazon MQ | Qualquer cenário | Confirmar o volume alocado e o preço por GB-mês |
-| Savings Plans e instâncias reservadas | Operação contínua | Calcular na calculadora; não estimo percentual |
+| Taxa de gerenciamento do cluster GKE | Sempre | A página de preços cita uma taxa por cluster-hora com um crédito mensal por conta de faturamento. Confirme o valor e se o crédito cobre o cluster desta solução |
+| API Gateway | Se a quota por cliente ficar no gateway | Calcular por milhão de chamadas na calculadora |
+| Apigee | Só se houver muitos integradores externos com portal e análise | Calcular na calculadora; tende a ser muito maior que o API Gateway |
+| Identity Platform | Não se aplica ao consumo por *client credentials* | Ver a comparação abaixo |
+| Cloud Monitoring, políticas de alerta e verificações de disponibilidade | Produção | Confirmar o que é gratuito |
+| Cloud DNS | Produção | Calcular por zona e por consulta |
+| Cloud SQL Enterprise Plus | Se a empresa exigir a disponibilidade e a manutenção sem parada da edição superior | Calcular na calculadora |
+| Logs de auditoria de acesso a dados (Cloud SQL, Secret Manager, KMS) | Auditoria completa | O volume ingerido é premissa; se passar de 60 GiB por mês, entra a faixa paga do Logging |
+| Descontos por uso comprometido | Operação contínua | Calcular na calculadora; não estimo percentual |
+| Cloud NAT | Só se um componente precisar de saída para a internet | Referência da página: US$ 0,045 por GiB, mais o custo por IP; 100 GB seriam cerca de US$ 4,50 de dados |
 
 ## Gerenciado ou auto gerenciado
 
-### Amazon MQ ou RabbitMQ próprio
+### Pub/Sub ou RabbitMQ no GKE
 
-| | Amazon MQ (cluster `mq.m7g.medium`) | RabbitMQ próprio em EC2 |
+| | Pub/Sub | RabbitMQ em 3 pods no GKE Autopilot |
 |---|---|---|
-| Custo mensal estimado | 476,91 | 3 x `t4g.medium` (0,0536 x 730) + 3 x 50 GB gp3 (0,152 por GB-mês) = 117,38 + 22,80 = **140,18** |
-| Quem opera | AWS: patch, failover, cluster em 3 AZs | A equipe: atualização, quorum queues, backup, monitoramento do cluster |
-| Risco | Baixo | Médio a alto: partição de rede e disco cheio caem na operação própria |
+| Custo mensal estimado | cerca de 0 neste volume (10 vezes o volume: cerca de 1,95) | pods: 119,02 a 190,42 (3 x 1 vCPU e 2 GiB); discos SSD de 3 x 50 GB: 25,50 a 52,50 (hipótese H); **total 144,52 a 242,92** |
+| Quem opera | O Google | A equipe: atualização, filas de quórum, volumes, partição de rede, disco cheio, backup |
+| Código | Exige o adaptador do [ADR-012](adrs/ADR-012-broker-em-producao-no-gcp.md) | O código de hoje funciona sem mudança |
+| Risco | Baixo de operação; médio de semântica (tópico sem assinatura descarta; contagem de tentativas na DLQ) | Médio a alto de operação |
 
-O RabbitMQ em Fargate não é uma boa alternativa: o cluster precisa de disco persistente com bom desempenho e identidade de nó estável, que o Fargate atende mal. Três tarefas de 1 vCPU e 2 GB custariam cerca de US$ 185,71 por mês sem esses atributos. A diferença para o gerenciado, cerca de US$ 337 por mês, paga a operação que a equipe deixaria de fazer; para uma equipe pequena de um banco, é o preço de não manter um cluster de mensageria.
+A diferença de custo é pequena em valor absoluto (algumas centenas de dólares por mês), e a decisão pesa mais em **operação e em código**: o Pub/Sub tira o cluster da equipe, ao preço de um adaptador novo e do desvio entre o broker dos testes e o de produção. As horas de operação do RabbitMQ no GKE não estão na conta.
 
-Uma terceira via, descrita no [ADR-003](adrs/ADR-003-rabbitmq-vs-kafka-vs-sqs.md), é trocar o RabbitMQ por SQS e SNS. Com 100 mil eventos por dia (3 milhões por mês) e três chamadas por mensagem (envio, recebimento e remoção), a lista de `sa-east-1` (US$ 0,40 por milhão de requisições padrão, 1 milhão gratuito) leva a algo como US$ 3 por mês. É a opção mais barata, mas muda o contrato de mensageria (fila, DLQ, ordenação, `mandatory`) e o código do relay e do consumidor.
+### Keycloak no GKE ou Identity Platform
 
-### Keycloak ou Cognito
-
-| | Keycloak em Fargate (2 tarefas) | Amazon Cognito (credenciais de cliente) |
+| | Keycloak no GKE (2 pods de 1 vCPU e 2 GiB) | Identity Platform |
 |---|---|---|
-| Custo mensal estimado | 123,81, mais o banco (um terceiro schema no RDS de lançamentos) | Por requisição de token: US$ 0,00225 por requisição nas primeiras 250 mil do mês. Com 20 integradores renovando a cada 5 minutos seriam 172.800 requisições, cerca de **US$ 388,80**; renovando a cada hora, 14.400 requisições, cerca de **US$ 32,40**. Os clientes M2M em si não têm cobrança na lista |
-| Quem opera | A equipe: atualização, realm, alta disponibilidade, TLS | AWS |
-| Observação | O que o código já usa; tudo é configuração | A lista de preços mostra variantes "Free" e "Full" para a requisição de token, e não consegui determinar o que a gratuita cobre: validar na calculadora |
+| Custo mensal estimado | 79,34 a 126,95 de pods, mais o banco (um terceiro banco na instância de lançamentos) | Cobrança por usuário ativo mensal (preço não confirmado) |
+| Serve a *client credentials* | **Sim.** É o que o código usa | **Não é o caso de uso.** O produto é voltado à autenticação de usuários finais; não confirmei suporte ao fluxo de máquina a máquina e, se não houver, ele não substitui o Keycloak aqui |
+| Quem opera | A equipe: atualização, realm, HA, TLS | O Google |
 
-O custo do Cognito depende de quantas vezes o integrador pede token, e isso é controle do cliente: um integrador que reutiliza o token até expirar custa pouco; um que pede token a cada chamada custa muito. A mudança para o Cognito também **não é só configuração**: os tokens de credencial de cliente do Cognito, segundo a documentação da AWS, trazem `client_id` e `scope` em vez de `aud`, e o claim `comerciante_id` exigiria um gatilho de geração de token. Isso muda a validação do JWT ([ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md)). Verifique na documentação do Cognito antes de decidir.
+Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tokens de identidade (OIDC) emitidos para contas de serviço, que dispensam o Keycloak, mas não carregam o claim `comerciante_id` nem os escopos; esse vínculo teria de ficar em configuração dos serviços. Isso muda a validação do JWT ([ADR-010](adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md)) e não serve a integradores externos. Por isso a proposta mantém o Keycloak. Confirme na documentação do Identity Platform antes de decidir diferente.
 
-## Otimizações com valor calculável
+## Otimizações com valor calculável e práticas de FinOps
 
 | Otimização | Efeito | Cálculo |
 |---|---|---|
-| Fargate em ARM (Graviton) no cenário B | de US$ 278,57 para US$ 223,18 por mês, **economia de US$ 55,39** | 4,5 vCPU e 9 GB: x86 (4,5 x 0,0696 + 9 x 0,0076) x 730; ARM (4,5 x 0,0557 + 9 x 0,00612) x 730. Exige imagens arm64 e novo teste de carga |
-| RabbitMQ em EC2 no lugar do Amazon MQ | economia de cerca de US$ 337 por mês | ver a comparação acima; troca custo por operação |
-| SQS e SNS no lugar do RabbitMQ | economia de cerca de US$ 474 por mês | troca contrato de mensageria; exige reescrever relay e consumidor |
-| Um NAT Gateway no cenário B | economia de US$ 67,89 por mês | perde a tolerância à falha de uma AZ para a saída à internet |
+| Pods Spot no ambiente de homologação (cenário A) | A parcela de CPU cai de US$ 64,97 para US$ 19,42 por mês, **economia de US$ 45,55** | 2,0 vCPU x 0,0133 x 730 contra 2,0 x 0,0445 x 730. A referência de US$ 0,0133 por vCPU-hora de pod Spot é classe R e a memória não foi confirmada. Pods Spot podem ser retomados a qualquer momento: **só para ambiente que aceita parada**, nunca para o relay ou o consumidor em produção |
+| Pub/Sub no lugar de RabbitMQ no GKE | economia de cerca de US$ 145 a 243 por mês | ver a comparação acima; troca custo de operação por trabalho de adaptador |
+| Sem Cloud NAT | evita a taxa por IP e por GiB | nenhum componente precisa de saída para a internet |
+| Descontos por uso comprometido | não calculado | Depois de 3 a 6 meses de uso estável, avaliar com os dados reais |
+
+Práticas de governança de custo (aproveitadas de um estudo anterior do mesmo autor, sem os números dele):
+- **Rótulos obrigatórios** em todos os recursos: `env`, `owner`, `cost-center`, `app`, `team`, para atribuir custo por ambiente e por equipe.
+- **Orçamento e alertas** no Cloud Billing por ambiente.
+- **Recommender** para revisão trimestral de dimensionamento.
+- **Desligar ambientes de não produção** fora do horário comercial.
+- **Custo por transação** como indicador: custo mensal dividido pelos lançamentos do mês.
 
 ## O que este documento não afirma
 
-- Não há custo medido numa conta AWS. Os totais são aritmética sobre preços de lista e premissas de volume.
-- O tamanho das tarefas e dos bancos é hipótese a validar com teste de carga na própria AWS.
-- Não incluo impostos, suporte AWS, taxas de câmbio nem horas de operação da equipe.
+- Não há custo medido numa conta do Google Cloud. Os totais são aritmética sobre preços de referência e premissas de volume.
+- A maior parte da incerteza está nos preços do GKE Autopilot, do Cloud SQL e do Memorystore em São Paulo, que não consegui confirmar em fonte oficial; a faixa existe por isso.
+- O tamanho dos pods e dos bancos é hipótese a validar com teste de carga no próprio Google Cloud.
+- Não incluo impostos, suporte do Google, câmbio nem horas de operação da equipe.
