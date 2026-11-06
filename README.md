@@ -41,7 +41,7 @@ Os números de carga são de uma máquina de desenvolvimento com todos os servi�
 ## Pré-requisitos
 
 - Docker Desktop 4.x ou superior, com o Docker Compose v2
-- Node.js 20 ou superior, apenas para a integração (`test-integration`) e para os scripts de DLQ e de dashboard
+- Node.js 24 ou superior, apenas para a integração (`test-integration`) e para os scripts de DLQ e de dashboard
 - Portas livres: 3001, 3002, 5432, 5672, 6379, 8080, 15672 (e 3000, 9090, 16686 se usar a observabilidade)
 
 ## Como subir
@@ -188,7 +188,7 @@ O tracing vem desligado por padrão porque acrescenta CPU por requisição ([doc
 | Segurança | OAuth2 client credentials, JWT RS256, escopos | [ADR-010](docs/adrs/ADR-010-autenticacao-e-autorizacao-de-consumo.md) |
 | Falhas | Falha transitória não vai para a DLQ | [ADR-011](docs/adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md) |
 | Nuvem alvo | Google Cloud (GKE Autopilot, Cloud SQL, Memorystore) com Pub/Sub como broker de produção | [ADR-012](docs/adrs/ADR-012-broker-em-producao-no-gcp.md) |
-| Stack | TypeScript e Node.js 20, Express, PostgreSQL, Docker Compose | [ADR-013](docs/adrs/ADR-013-stack-tecnologica.md) |
+| Stack | TypeScript e Node.js 24 LTS, Express, PostgreSQL, Docker Compose | [ADR-013](docs/adrs/ADR-013-stack-tecnologica.md) |
 
 Outras escolhas: valores monetários como string na API e `NUMERIC(15,2)` com `decimal.js`; datas de competência como `YYYY-MM-DD`, sem fuso; erros em `application/problem+json`; paginação por cursor.
 

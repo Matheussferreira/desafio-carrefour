@@ -1,7 +1,7 @@
 # Multi-stage: a imagem final leva só o JavaScript compilado e as dependências de produção,
 # roda como usuário sem privilégios e não carrega testes nem ferramentas de desenvolvimento.
 
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 WORKDIR /app
 
 # Todas as dependências (inclui as de desenvolvimento), para compilar e testar

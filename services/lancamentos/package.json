@@ -2,7 +2,7 @@
   "name": "lancamentos",
   "version": "1.0.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
     "build": "tsc",
@@ -45,7 +45,7 @@
     "@types/amqplib": "^0.10.5",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.10",
+    "@types/node": "^24.0.0",
     "@types/pg": "^8.11.6",
     "@types/supertest": "^6.0.2",
     "@types/uuid": "^10.0.0",

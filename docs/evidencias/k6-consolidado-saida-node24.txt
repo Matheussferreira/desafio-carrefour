@@ -1,0 +1,43 @@
+Saída final do k6 completo (consolidado.js) com os serviços em imagens node:24-alpine (Node.js v24.22.2), sem pgcrypto nas migrações. Código de saída 0. A barra de progresso foi omitida; o resumo abaixo está sem alteração.
+
+
+running (3m09.9s), 000/150 VUs, 14002 complete and 0 interrupted iterations
+cache_hit            ✓ [ 100% ] 000/050 VUs  1m0s  50.00 iters/s
+cache_miss           ✓ [ 100% ] 000/050 VUs  1m0s  50.00 iters/s
+pico_acima_do_limite ✓ [ 100% ] 000/100 VUs  40s   200.00 iters/s
+
+     ✓ HTTP 200
+     ✓ latência < 500ms
+
+     checks.........................: 100.00% ✓ 12002     ✗ 0    
+     data_received..................: 16 MB   86 kB/s
+     data_sent......................: 16 MB   84 kB/s
+     http_req_blocked...............: avg=58.06µs  min=3.5µs      med=7.3µs    max=525.83ms p(90)=11µs     p(95)=13.4µs  
+     http_req_connecting............: avg=46.03µs  min=0s         med=0s       max=525.67ms p(90)=0s       p(95)=0s      
+     http_req_duration..............: avg=5.33ms   min=962.87µs   med=3.5ms    max=1.61s    p(90)=6.83ms   p(95)=11.52ms 
+       { expected_response:true }...: avg=5.33ms   min=962.87µs   med=3.5ms    max=1.61s    p(90)=6.83ms   p(95)=11.52ms 
+     ✓ { scenario:cache_hit }.......: avg=4.31ms   min=2.66ms     med=3.84ms   max=30.36ms  p(90)=5.44ms   p(95)=6.73ms  
+     ✓ { scenario:cache_miss }......: avg=4.43ms   min=2.57ms     med=3.76ms   max=45.82ms  p(90)=5.29ms   p(95)=7.44ms  
+     http_req_failed................: 0.00%   ✓ 0         ✗ 14076
+     ✓ { scenario:cache_hit }.......: 0.00%   ✓ 0         ✗ 3000 
+     ✓ { scenario:cache_miss }......: 0.00%   ✓ 0         ✗ 3001 
+     http_req_receiving.............: avg=192.33µs min=42.11µs    med=163.51µs max=9.26ms   p(90)=237.64µs p(95)=286.34µs
+     http_req_sending...............: avg=83.45µs  min=-2345214ns med=76.6µs   max=5.9ms    p(90)=110.6µs  p(95)=136.43µs
+     http_req_tls_handshaking.......: avg=0s       min=0s         med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=5.06ms   min=779.46µs   med=3.25ms   max=1.61s    p(90)=6.49ms   p(95)=11.09ms 
+     http_reqs......................: 14076   74.13112/s
+     iteration_duration.............: avg=6.34ms   min=1.18ms     med=3.94ms   max=9.88s    p(90)=7.16ms   p(95)=12.01ms 
+     iterations.....................: 14002   73.7414/s
+   ✓ non_ok_rate....................: 0.00%   ✓ 0         ✗ 6001 
+   ✓ pico_429_sem_retry_after.......: 0.00%   ✓ 0         ✗ 2491 
+     pico_respostas_200.............: 5510    29.018363/s
+     pico_respostas_429.............: 2491    13.118828/s
+   ✓ pico_respostas_outras..........: 0       0/s
+     vus............................: 1       min=0       max=22 
+     vus_max........................: 150     min=150     max=150
+
+
+running (3m09.9s), 000/150 VUs, 14002 complete and 0 interrupted iterations
+cache_hit            ✓ [ 100% ] 000/050 VUs  1m0s  50.00 iters/s
+cache_miss           ✓ [ 100% ] 000/050 VUs  1m0s  50.00 iters/s
+pico_acima_do_limite ✓ [ 100% ] 000/100 VUs  40s   200.00 iters/s

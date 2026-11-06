@@ -24,8 +24,8 @@ C4Container
 
     Person(comerciante, "Comerciante")
 
-    Container(lancamentos, "Serviço Lancamentos", "Node.js 20 / Express", "Registra débitos e créditos; publica eventos via Outbox")
-    Container(consolidado, "Serviço Consolidado", "Node.js 20 / Express", "Consome eventos e mantém projeção de saldo diário")
+    Container(lancamentos, "Serviço Lancamentos", "Node.js 24 / Express", "Registra débitos e créditos; publica eventos via Outbox")
+    Container(consolidado, "Serviço Consolidado", "Node.js 24 / Express", "Consome eventos e mantém projeção de saldo diário")
     ContainerDb(pg_l, "lancamentos_db", "PostgreSQL 16", "Tabelas: lancamentos, outbox")
     ContainerDb(pg_c, "consolidado_db", "PostgreSQL 16", "Tabelas: saldo_diario (PK comerciante_id + data), comerciante_progresso, eventos_processados")
     Container(mq, "RabbitMQ", "RabbitMQ 3.13", "Exchange: lancamentos.events (topic) + DLX/DLQ")

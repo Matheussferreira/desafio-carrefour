@@ -4,7 +4,7 @@
 #   3. derruba a infra, passe ou falhe
 #
 # Uso: .\test-integration.ps1
-# Requer Docker Desktop (Compose v2) e Node 20 ou superior.
+# Requer Docker Desktop (Compose v2) e Node 24 ou superior.
 
 $raiz = $PSScriptRoot
 $compose = Join-Path $raiz 'docker-compose.integration.yml'

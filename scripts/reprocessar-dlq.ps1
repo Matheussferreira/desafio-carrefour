@@ -2,7 +2,7 @@
 .SYNOPSIS
   Devolve as mensagens da DLQ do consolidado à fila principal.
 .DESCRIPTION
-  Usa a API de gerenciamento do RabbitMQ (porta 15672) por meio de scripts\reprocessar-dlq.js, que precisa só do Node 20.
+  Usa a API de gerenciamento do RabbitMQ (porta 15672) por meio de scripts\reprocessar-dlq.js, que precisa só do Node 24.
   Reentregar é seguro porque o consumidor é idempotente. Mensagem inválida volta para a DLQ; corrija a causa antes.
 .EXAMPLE
   .\scripts\reprocessar-dlq.ps1 -Simular
@@ -20,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Error 'Node.js 20 ou superior é necessário para este script.'
+    Write-Error 'Node.js 24 ou superior é necessário para este script.'
     exit 2
 }
 

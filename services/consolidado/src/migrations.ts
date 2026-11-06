@@ -5,8 +5,6 @@ const migrations = [
   {
     name: '001_create_tables',
     sql: `
-      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
       CREATE TABLE IF NOT EXISTS saldo_diario (
         data            DATE          PRIMARY KEY,
         total_creditos  NUMERIC(15,2) NOT NULL DEFAULT 0,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Devolve as mensagens da DLQ à fila principal, pela API de gerenciamento do RabbitMQ.
- * Os wrappers reprocessar-dlq.ps1 e reprocessar-dlq.sh chamam este arquivo; precisa só do Node 20.
+ * Os wrappers reprocessar-dlq.ps1 e reprocessar-dlq.sh chamam este arquivo; precisa só do Node 24.
  *
  * Uso: node scripts/reprocessar-dlq.js [--limite N] [--simular] [--url URL] [--usuario U] [--senha S]
  *                                      [--dlq NOME] [--destino NOME]

@@ -13,12 +13,12 @@ Os ADRs anteriores decidem o estilo (dois serviços, comunicação assíncrona),
 
 | Camada | Escolha | Papel |
 |---|---|---|
-| Linguagem e runtime | TypeScript sobre Node.js 20 | Os dois serviços e o consumidor |
+| Linguagem e runtime | TypeScript sobre Node.js 24 LTS | Os dois serviços e o consumidor |
 | Framework HTTP | Express 4 | APIs REST, middlewares de autenticação, limite de taxa e métricas |
 | Banco | PostgreSQL 16 (Cloud SQL for PostgreSQL em produção no GCP) | Lançamentos, outbox, projeção do consolidado |
 | Execução local | Docker Compose | Pilha completa com um comando, incluindo broker, cache, Keycloak e observabilidade |
 
-### TypeScript e Node.js 20
+### TypeScript e Node.js 24 LTS
 
 - É a linguagem que o autor domina, e isso pesa: o risco de um desafio com prazo é errar no que não se conhece bem.
 - O modelo de I/O assíncrono atende o perfil dos dois serviços, que passam o tempo esperando banco, cache e broker, e não calculando. O consumidor processa uma mensagem por vez, e o relay é um laço de consulta e publicação.
@@ -37,12 +37,25 @@ Os ADRs anteriores decidem o estilo (dois serviços, comunicação assíncrona),
 - `NUMERIC` guarda valores monetários exatos, sem ponto flutuante. O valor trafega como string na API e é tratado com `decimal.js` no código.
 - `FOR UPDATE SKIP LOCKED` permite que mais de um relay divida as linhas pendentes do outbox ([ADR-008](ADR-008-relay-processo-separado.md)).
 - `ON CONFLICT` implementa a idempotência com uma constraint única, sem depender de isolamento serializável ([ADR-007](ADR-007-idempotencia.md)) e também o upsert da projeção do consolidado ([ADR-009](ADR-009-saldo-acumulado-e-multi-comerciante.md)).
-- No Google Cloud existe como serviço gerenciado (Cloud SQL), com alta disponibilidade regional, recuperação para um instante e backups ([arquitetura-alvo-cloud.md](../arquitetura-alvo-cloud.md)). A única extensão usada é a `pgcrypto` (para `gen_random_uuid()`), que deve ser conferida na lista de extensões suportadas pelo Cloud SQL antes do primeiro ambiente; no PostgreSQL 13 ou superior a função também existe sem extensão.
+- No Google Cloud existe como serviço gerenciado (Cloud SQL), com alta disponibilidade regional, recuperação para um instante e backups ([arquitetura-alvo-cloud.md](../arquitetura-alvo-cloud.md)).
 
 ### Docker Compose
 
 - Um `docker compose up` sobe a pilha inteira, o que é parte da avaliação (execução local reproduzível) e também a base dos testes de integração e de resiliência, que derrubam serviços reais.
 - É um recurso de desenvolvimento. Produção roda em Kubernetes ([arquitetura-alvo-cloud.md](../arquitetura-alvo-cloud.md)), e as imagens são as mesmas.
+
+### Versão do Node.js: 24 LTS
+
+O Node.js 20 saiu do suporte em abril de 2026, então a linha adotada é a 24 LTS: imagens `node:24-alpine`, CI com `node-version: 24`, `engines` em `>=24` e `@types/node` 24. Nenhuma dependência quebrou, e por isso não foi preciso recuar para a 22 LTS. Validação feita em 2026-11-05 com o Node.js v24.22.2:
+
+- compilação (`tsc --noEmit`) dos dois serviços;
+- testes unitários: 108 de lançamentos e 135 de consolidado, todos passando;
+- testes de integração dos dois serviços contra PostgreSQL, RabbitMQ e Redis reais, todos passando;
+- k6 completo contra a pilha com imagens em Node 24: 0,00% de falhas em `cache_hit` e `cache_miss`, p95 de 6,73 ms e 7,44 ms nesses cenários, 2.491 respostas 429 no pico, todas com `Retry-After` ([saída](../evidencias/k6-consolidado-saida-node24.txt), [resumo](../evidencias/k6-consolidado-resumo-node24.json)).
+
+### Sem extensão no PostgreSQL
+
+O código não depende de extensões: `gen_random_uuid()` é nativa desde o PostgreSQL 13, e a migração deixou de criar a `pgcrypto`. Bancos já criados continuam funcionando, porque a migração é registrada pelo nome e não é reexecutada.
 
 ## Alternativas
 
@@ -69,5 +82,5 @@ Negativas:
 - Node.js tem um único thread de execução por processo: uma tarefa de CPU pesada bloqueia o event loop. Hoje não há tarefa assim, e a escala é horizontal por processo.
 - O Express não impõe estrutura; a disciplina de camadas depende da equipe e da revisão.
 - TypeScript e Express não são uma escolha habitual em bancos grandes que padronizam em Java ou .NET. Numa equipe assim, a decisão seria revisitada pelo padrão da casa, e o custo de reescrita seria limitado, por serem apenas dois serviços pequenos.
-- O Node.js 20 sai do suporte pelo calendário público de versões do Node.js (previsto para abril de 2026, a confirmar). Subir para uma versão LTS mais nova é manutenção pendente, listada em [evolucoes.md](../evolucoes.md).
+- A linha 24 LTS tem suporte previsto por mais tempo, mas todo Node.js LTS sai do suporte em algum momento: a versão precisa de revisão periódica.
 - O Express 4 está em manutenção, e a versão 5 existe; a migração é pequena, mas não foi feita.

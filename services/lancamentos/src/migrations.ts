@@ -5,8 +5,6 @@ const migrations = [
   {
     name: '001_create_tables',
     sql: `
-      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
       CREATE TABLE IF NOT EXISTS lancamentos (
         id               UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
         valor            NUMERIC(15,2) NOT NULL CHECK (valor > 0),

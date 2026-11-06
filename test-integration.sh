@@ -5,7 +5,7 @@
 #   3. Destrói a infra independentemente do resultado
 #
 # Uso: bash test-integration.sh
-# Requer: Docker com Compose v2 e Node 20+. No Windows prefira ./test-integration.ps1
+# Requer: Docker com Compose v2 e Node 24+. No Windows prefira ./test-integration.ps1
 
 set -uo pipefail
 
