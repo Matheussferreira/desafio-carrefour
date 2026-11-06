@@ -66,7 +66,7 @@ O crédito que sobra (US$ 1,40) não acumula. Se a empresa já tem outro cluster
 
 ## Cenário A: mínimo viável (um ambiente enxuto, sem alta disponibilidade)
 
-Serve para homologação ou para uma operação pequena que aceita parada. **Não atende produção de um banco**: os bancos são de zona única, o Redis é do nível Basic e há um pod de cada serviço.
+É o **mínimo viável de produção**: uma operação pequena que aceita ter menos redundância. **Não tem alta disponibilidade**: os bancos são de zona única, o Redis é do nível Basic e há um pod de cada serviço, então uma falha de zona ou de pod causa indisponibilidade até a recuperação.
 
 | Item | Cl. | US$/mês | Cálculo |
 |---|---|---|---|
@@ -183,7 +183,7 @@ Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tok
 
 | Otimização | Efeito | Cálculo |
 |---|---|---|
-| Pods Spot (ver a seção abaixo) | Homologação inteira (cenário A): **US$ 126,05 para US$ 37,80, economia de US$ 88,25 (cerca de 70%)**. Produção: só relay e consumidor, economia de US$ 22,06 no relay | Cálculos na seção "Pods Spot". Preços Spot oficiais de São Paulo (classe O) |
+| Pods Spot (ver a seção abaixo) | Só o relay é elegível, com ao menos uma réplica sob demanda. Cenário B: **economia de US$ 11,03** (31,51 para 20,48). Cenário A: **economia zero** com um pod só; a segunda réplica em Spot custaria US$ 4,72 contra US$ 15,76 sob demanda | Cálculos na seção "Pods Spot". Preços Spot oficiais de São Paulo (classe O) |
 | Pub/Sub no lugar de RabbitMQ no GKE | economia de cerca de US$ 215 a 242 por mês | ver a comparação acima; troca custo de operação por trabalho de adaptador |
 | Sem Cloud NAT | evita a taxa por IP e por GiB | nenhum componente precisa de saída para a internet |
 | Um cluster por conta de faturamento | evita US$ 73,00 por mês por cluster adicional | o crédito de US$ 74,40 cobre só um cluster; agrupar ambientes em namespaces do mesmo cluster tem custo de isolamento a avaliar |
@@ -193,22 +193,24 @@ Para um serviço dentro do próprio Google Cloud existe uma terceira via, os tok
 
 Preço oficial de São Paulo, lido na mesma página e data dos demais: vCPU US$ 0,0212 por hora e memória US$ 0,0023449 por GiB-hora, contra 0,0707 e 0,0078164 sob demanda (cerca de 30%).
 
-| Caso | Sob demanda | Spot | Economia | Cálculo do Spot |
+| Caso (relay com pods de 0,25 vCPU e 0,5 GiB, hipótese) | Sob demanda | Com Spot | Economia | Cálculo |
 |---|---|---|---|---|
-| Cenário A inteiro (2,0 vCPU e 4 GiB) | 126,05 | **37,80** | **88,25** | (2,0 x 0,0212 + 4 x 0,0023449) x 730 |
-| Relay no cenário B (2 pods de 0,25 vCPU e 0,5 GiB, 0,5 vCPU e 1 GiB no total) | 31,51 | **9,45** | **22,06** | (0,5 x 0,0212 + 1 x 0,0023449) x 730 |
+| Um pod de relay | 15,76 | 4,72 | 11,03 por pod | OD: (0,25 x 0,0707 + 0,5 x 0,0078164) x 730; Spot: (0,25 x 0,0212 + 0,5 x 0,0023449) x 730 |
+| **Cenário B**: 2 réplicas, uma sob demanda e uma Spot | 31,51 (as duas sob demanda) | **20,48** | **11,03** | 15,76 + 4,72 |
+| **Cenário A**: 1 réplica, sob demanda | 15,76 | 15,76 | **0,00** | Com um pod só não há réplica a mover para Spot sem violar a regra de manter uma sob demanda |
+| Cenário A com uma segunda réplica Spot | 31,51 (segunda sob demanda) | 20,48 | 11,03 contra uma segunda réplica sob demanda | Acrescenta US$ 4,72, e não US$ 15,76, para ter redundância do relay |
 
 **Spot só serve ao que tolera interrupção.** O Google pode retomar um pod Spot a qualquer momento, com aviso curto. Para esta solução:
 
 | Componente | Spot? | Por quê |
 |---|---|---|
-| Consumidor | **Sim, com ressalva** | Idempotente ([ADR-007](adrs/ADR-007-idempotencia.md)): a mensagem em processamento volta e é reaplicada sem duplicar. A ressalva é que hoje o consumidor roda **dentro do pod do consolidado**, junto com a API de leitura; usar Spot só para ele exige separá-lo num Deployment próprio, e isso não existe no código. Enquanto estiver junto, o pod do consolidado não pode ser Spot em produção |
-| Relay | **Sim, com ressalva** | Retomar o relay só atrasa a publicação, e `FOR UPDATE SKIP LOCKED` com duas réplicas evita a duplicação ([ADR-008](adrs/ADR-008-relay-processo-separado.md)). A ressalva é o atraso de consistência (`consolidado_evento_lag_seconds`, que o RNF-05 limita em cerca de 5 s) durante a troca de pod, e a retomada simultânea das duas réplicas deixaria o outbox acumular até um pod novo subir (dezenas de segundos, a medir). O encerramento gracioso existe (RNF-10), mas o prazo de aviso do Spot não foi confirmado e pode ser menor que o do desligamento normal. Manter ao menos uma réplica sob demanda |
+| Consumidor | **Não, hoje; sim se for separado** | Idempotente ([ADR-007](adrs/ADR-007-idempotencia.md)), então a mensagem em processamento volta e é reaplicada sem duplicar, e tolera interrupção. Mas hoje ele roda **dentro do pod do consolidado**, junto com a API de leitura, e esse pod fica sob demanda. O consumidor só seria elegível se fosse separado num Deployment próprio, o que não existe no código (item em [evolucoes.md](evolucoes.md)) |
+| Relay | **Sim, com ressalva** | Retomar o relay só atrasa a publicação, e `FOR UPDATE SKIP LOCKED` com duas réplicas evita a duplicação ([ADR-008](adrs/ADR-008-relay-processo-separado.md)). A ressalva é o atraso de consistência (`consolidado_evento_lag_seconds`, que o RNF-05 limita em cerca de 5 s) durante a troca de pod, e por isso **ao menos uma réplica fica sob demanda**: se todas fossem Spot e fossem retomadas juntas, o outbox acumularia até um pod novo subir (dezenas de segundos, a medir). O encerramento gracioso existe (RNF-10), mas o prazo de aviso do Spot não foi confirmado e pode ser menor que o do desligamento normal |
 | API de lançamentos | **Não** | Está no caminho de escrita e a disponibilidade do lançamentos é requisito (RNF-01) |
 | API do consolidado | **Não** | Está no caminho de leitura do requisito de 50 req/s |
 | Keycloak | **Não** | A emissão de token para integradores depende dele, e o modo de produção tem estado e sessão |
 
-O **cenário A**, por ser homologação que aceita parada, pode usar Spot em tudo: é o caso da primeira linha. Nenhum número de Spot deste documento foi medido; o risco de interrupção não tem preço na tabela e precisa ser observado em operação.
+A regra é a mesma nos dois cenários: **só o relay é elegível, e ao menos uma réplica fica sob demanda**; API de lançamentos, consolidado (que hoje inclui o consumidor) e Keycloak ficam sob demanda. O tamanho do pod do relay no cenário A é hipótese (o mesmo do B). Nenhum número de Spot deste documento foi medido; o risco de interrupção não tem preço na tabela e precisa ser observado em operação. Para um ambiente de homologação, que aceita parada, Spot em todos os pods seria possível, mas esse caso não entra em nenhum dos cenários deste documento e não foi calculado.
 
 Práticas de governança de custo (aproveitadas de um estudo anterior do mesmo autor, sem os números dele):
 - **Rótulos obrigatórios** em todos os recursos: `env`, `owner`, `cost-center`, `app`, `team`, para atribuir custo por ambiente e por equipe.

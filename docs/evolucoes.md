@@ -22,6 +22,7 @@ São correções e provas que o próprio projeto já identificou como lacuna. O 
 
 | Item | O que resolve | Gatilho | Esforço |
 |---|---|---|---|
+| Consumidor em Deployment próprio | Hoje o consumidor roda dentro do pod do consolidado, junto com a API de leitura. Separá-lo permitiria escalar cada um pelo seu sinal (CPU da API, atraso da assinatura para o consumidor) e tornaria o consumidor elegível a pods Spot, que tolera por ser idempotente ([custos.md](custos.md)) | Querer usar pods Spot no consumidor, ou o atraso da assinatura exigir escala independente da API de leitura (`consolidado_evento_lag_seconds` acima do limite do RNF-05 com a API ociosa) | P |
 | Retenção do outbox e de `eventos_processados` | Ambas crescem sem limite (cerca de 0,8 KB por evento só no outbox, medido). Sem rotina, o disco de 50 GB dura cerca de um ano a 100 mil lançamentos por dia (extrapolação) | Ocupação do disco acima de 50% ou o outbox passar de um prazo acordado | M |
 | Advisory lock nas migrations | Duas réplicas subindo juntas podem colidir ao registrar a migration | Quando houver mais de uma réplica, junto com o item de rate limit | P |
 | Retentativa de erro permanente sem bloquear a fila | Falha de banco já não bloqueia nem vai para a DLQ ([ADR-011](adrs/ADR-011-falha-transitoria-nao-vai-para-dlq.md)), mas um erro permanente ainda segura o consumidor por até 7 s (3 retentativas com `prefetch=1`) antes da DLQ | Observar `consolidado_consumer_retries_total` frequente, ou lag alto sem causa de carga | M |
